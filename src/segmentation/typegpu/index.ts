@@ -4,6 +4,8 @@ import tgpu from "typegpu";
 
 import type {
   PersonMask,
+  PersonSegmentationFrameKernel,
+  PersonSegmentationKernelState,
   PersonSegmentationProvider,
   PersonSegmentationSession,
   SegmentationContext,
@@ -11,6 +13,7 @@ import type {
 } from "../../core/types";
 import {
   computeSquareCrop,
+  type FrameCrop,
   packFrameCropParams,
   packUpsampleParams,
 } from "./internal/frameParams";
@@ -25,9 +28,23 @@ const DEFAULT_MODEL_URL = new URL(
   import.meta.url,
 ).toString();
 
+const PROVIDER_ID = "typegpu-selfie-segmentation-experimental";
+
 export interface TypeGpuPersonSegmentationOptions {
   /** CDN or application asset URL. The default points at this package's bundled model. */
   readonly modelUrl?: string;
+}
+
+// Plain data only (numbers plus GPU objects): the state is copied onto the camera thread's
+// worklet runtime, where `offerFrame` and `latestMask` run. TypeGPU's own objects stay on the
+// JS thread; `buildSegmentationBundle` has already flattened them into raw WebGPU handles.
+interface TypeGpuState extends PersonSegmentationKernelState {
+  readonly device: GPUDevice;
+  readonly bundle: SegmentationBundle;
+  timestampUs: number;
+  initialized: boolean;
+  /** The crop the latest mask was computed for; null until the first frame. */
+  crop: FrameCrop | null;
 }
 
 /**
@@ -38,96 +55,72 @@ export function typeGpuPersonSegmentation(
   options: TypeGpuPersonSegmentationOptions = {},
 ): PersonSegmentationProvider {
   return {
-    id: "typegpu-selfie-segmentation-experimental",
+    id: PROVIDER_ID,
     input: "gpu-texture",
-    prepare: async (context) => {
-      const plan = parseSegmenterPlan(
-        await loadModel(options.modelUrl ?? DEFAULT_MODEL_URL),
-      );
-      const root = await tgpu.initFromDevice({ device: context.device });
-      const bundle = buildSegmentationBundle(
-        root,
-        plan,
-        Math.max(context.outputWidth, context.outputHeight),
-      );
-      return new TypeGpuSession(context, bundle, root);
+    prepare: async (context) => createTypeGpuSession(context, options),
+  };
+}
+
+async function createTypeGpuSession(
+  context: SegmentationContext,
+  options: TypeGpuPersonSegmentationOptions,
+): Promise<PersonSegmentationSession> {
+  const buffer = await loadModel(options.modelUrl ?? DEFAULT_MODEL_URL);
+  const plan = parseSegmenterPlan(buffer);
+  const root = await tgpu.initFromDevice({ device: context.device });
+  const bundle = buildSegmentationBundle(
+    root,
+    plan,
+    Math.max(context.outputWidth, context.outputHeight),
+  );
+  const state: TypeGpuState = {
+    providerId: PROVIDER_ID,
+    device: context.device,
+    bundle,
+    timestampUs: Number.NEGATIVE_INFINITY,
+    initialized: false,
+    crop: null,
+  };
+  const frameKernel: PersonSegmentationFrameKernel = {
+    state,
+    offer: offerFrame,
+    latest: latestMask,
+    reset: resetTimeline,
+  };
+  // Disposal is tracked here, not in `state`, which may already be copied to a worklet runtime.
+  let disposed = false;
+  return {
+    frameKernel,
+    offer: (input) => {
+      if (!disposed) offerFrame(state, input);
+    },
+    latest: (renderTimestampUs) =>
+      disposed ? null : latestMask(state, renderTimestampUs),
+    reset: () => {
+      if (!disposed) resetTimeline(state);
+    },
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      root.destroy();
     },
   };
 }
 
-class TypeGpuSession implements PersonSegmentationSession {
-  private readonly context: SegmentationContext;
-  private readonly bundle: SegmentationBundle;
-  private readonly root: Awaited<ReturnType<typeof tgpu.initFromDevice>>;
-  private timestampUs = Number.NEGATIVE_INFINITY;
-  private initialized = false;
-  private disposed = false;
-
-  constructor(
-    context: SegmentationContext,
-    bundle: SegmentationBundle,
-    root: Awaited<ReturnType<typeof tgpu.initFromDevice>>,
-  ) {
-    this.context = context;
-    this.bundle = bundle;
-    this.root = root;
-  }
-
-  offer(input: SegmentationInput): void {
-    if (
-      this.disposed ||
-      input.kind !== "gpu-texture" ||
-      input.externalTexture == null
-    )
-      return;
-    if (input.timestampUs < this.timestampUs) return;
-    const crop = computeSquareCrop(input.width, input.height, 1, 0, 0, 1);
-    const device = this.context.device;
-    device.queue.writeBuffer(
-      this.bundle.preprocessParamsBuffer,
-      0,
-      packFrameCropParams(crop),
-    );
-    device.queue.writeBuffer(
-      this.bundle.upsampleParamsBuffer,
-      0,
-      packUpsampleParams(crop, true),
-    );
-    device.queue.writeBuffer(
-      this.bundle.postProcessParamsBuffer,
-      0,
-      new Uint32Array([this.initialized ? 1 : 0]),
-    );
-    encodeMask(
-      this.bundle,
-      device,
-      input.externalTexture,
-      input.commandEncoder,
-    );
-    this.initialized = true;
-    this.timestampUs = input.timestampUs;
-  }
-
-  latest(renderTimestampUs: number): PersonMask | null {
-    return this.timestampUs <= renderTimestampUs
-      ? {
-          texture: this.bundle.maskView,
-          timestampUs: this.timestampUs,
-          sourceUvToMaskUv: new Float32Array([1, 0, 0, 0, 1, 0]),
-        }
-      : null;
-  }
-
-  reset(): void {
-    this.initialized = false;
-    this.timestampUs = Number.NEGATIVE_INFINITY;
-  }
-  dispose(): void {
-    if (!this.disposed) {
-      this.disposed = true;
-      this.root.destroy();
-    }
-  }
+// Worklet helpers are captured by value when a caller is defined, so they must precede
+// their callers in this module.
+function dispatch(
+  pass: GPUComputePassEncoder,
+  operation: SegmentationBundle["preprocess"],
+  frameGroup?: GPUBindGroup,
+): void {
+  "worklet";
+  pass.setPipeline(operation.pipeline);
+  for (const group of operation.staticGroups)
+    pass.setBindGroup(group.index, group.bindGroup);
+  if (frameGroup != null)
+    pass.setBindGroup(operation.frameGroupIndex, frameGroup);
+  pass.dispatchWorkgroups(operation.workgroupsX, operation.workgroupsY);
 }
 
 function encodeMask(
@@ -136,6 +129,7 @@ function encodeMask(
   frame: GPUExternalTexture,
   encoder: GPUCommandEncoder,
 ): void {
+  "worklet";
   const preprocessFrameGroup = device.createBindGroup({
     layout: bundle.preprocessFrameLayout,
     entries: [{ binding: 0, resource: frame }],
@@ -153,17 +147,70 @@ function encodeMask(
   pass.end();
 }
 
-function dispatch(
-  pass: GPUComputePassEncoder,
-  operation: SegmentationBundle["preprocess"],
-  frameGroup?: GPUBindGroup,
+function offerFrame(
+  kernelState: PersonSegmentationKernelState,
+  input: SegmentationInput,
 ): void {
-  pass.setPipeline(operation.pipeline);
-  for (const group of operation.staticGroups)
-    pass.setBindGroup(group.index, group.bindGroup);
-  if (frameGroup != null)
-    pass.setBindGroup(operation.frameGroupIndex, frameGroup);
-  pass.dispatchWorkgroups(operation.workgroupsX, operation.workgroupsY);
+  "worklet";
+  const state = kernelState as TypeGpuState;
+  if (input.kind !== "gpu-texture" || input.externalTexture == null) return;
+  if (input.timestampUs < state.timestampUs) return;
+  const crop = computeSquareCrop(input.width, input.height, 1, 0, 0, 1);
+  state.crop = crop;
+  const device = state.device;
+  device.queue.writeBuffer(
+    state.bundle.preprocessParamsBuffer,
+    0,
+    packFrameCropParams(crop),
+  );
+  device.queue.writeBuffer(
+    state.bundle.upsampleParamsBuffer,
+    0,
+    packUpsampleParams(crop, true),
+  );
+  device.queue.writeBuffer(
+    state.bundle.postProcessParamsBuffer,
+    0,
+    new Uint32Array([state.initialized ? 1 : 0]),
+  );
+  encodeMask(state.bundle, device, input.externalTexture, input.commandEncoder);
+  state.initialized = true;
+  state.timestampUs = input.timestampUs;
+}
+
+/**
+ * Maps a full-frame source UV to the mask texture's UV. The mask covers only the square centre
+ * crop the model looked at, and the model saw that crop mirrored (see `videoPreprocessKernel`
+ * and `cameraUvFromScreenUv`), so mask u runs opposite to source u.
+ */
+function maskTransformFor(crop: FrameCrop): Float32Array {
+  "worklet";
+  const scaleX = crop.sourceWidth / crop.cropSizeX;
+  const scaleY = crop.sourceHeight / crop.cropSizeY;
+  const offsetX = -crop.cropOriginX / crop.cropSizeX;
+  const offsetY = -crop.cropOriginY / crop.cropSizeY;
+  return new Float32Array([-scaleX, 0, 1 - offsetX, 0, scaleY, offsetY]);
+}
+
+function latestMask(
+  kernelState: PersonSegmentationKernelState,
+  renderTimestampUs: number,
+): PersonMask | null {
+  "worklet";
+  const state = kernelState as TypeGpuState;
+  if (state.crop == null || state.timestampUs > renderTimestampUs) return null;
+  return {
+    texture: state.bundle.maskView,
+    timestampUs: state.timestampUs,
+    sourceUvToMaskUv: maskTransformFor(state.crop),
+  };
+}
+
+function resetTimeline(kernelState: PersonSegmentationKernelState): void {
+  "worklet";
+  const state = kernelState as TypeGpuState;
+  state.initialized = false;
+  state.timestampUs = Number.NEGATIVE_INFINITY;
 }
 
 async function loadModel(url: string): Promise<ArrayBuffer> {

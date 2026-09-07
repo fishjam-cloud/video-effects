@@ -23,6 +23,7 @@ export function clamp(
   maximum: number,
   fallback: number,
 ): number {
+  "worklet";
   if (value == null || !Number.isFinite(value)) return fallback;
   return Math.min(maximum, Math.max(minimum, value));
 }

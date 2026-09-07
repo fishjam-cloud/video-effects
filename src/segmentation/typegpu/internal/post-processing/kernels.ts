@@ -60,38 +60,50 @@ export const initialUpsampleParams = {
   edgeAware: 0,
 };
 
-export const temporalLayout = tgpu.bindGroupLayout({
-  params: { uniform: PostProcessParams },
-  raw: { storage: d.arrayOf(d.f32), access: "readonly" },
-  historyLogits: { storage: d.arrayOf(d.f32), access: "mutable" },
-  filtered: { storage: d.arrayOf(d.f32), access: "mutable" },
-});
+export const temporalLayout = tgpu
+  .bindGroupLayout({
+    params: { uniform: PostProcessParams },
+    raw: { storage: d.arrayOf(d.f32), access: "readonly" },
+    historyLogits: { storage: d.arrayOf(d.f32), access: "mutable" },
+    filtered: { storage: d.arrayOf(d.f32), access: "mutable" },
+  })
+  .$idx(0);
 
-export const priorLayout = tgpu.bindGroupLayout({
-  src: { storage: d.arrayOf(d.f32), access: "readonly" },
-  dst: { storage: d.arrayOf(d.f32), access: "mutable" },
-});
+export const priorLayout = tgpu
+  .bindGroupLayout({
+    src: { storage: d.arrayOf(d.f32), access: "readonly" },
+    dst: { storage: d.arrayOf(d.f32), access: "mutable" },
+  })
+  .$idx(0);
 
-export const upsampleParamsLayout = tgpu.bindGroupLayout({
-  params: { uniform: UpsampleParams },
-});
+export const upsampleParamsLayout = tgpu
+  .bindGroupLayout({
+    params: { uniform: UpsampleParams },
+  })
+  .$idx(0);
 
-export const upsampleFrameLayout = tgpu.bindGroupLayout({
-  frame: { externalTexture: d.textureExternal() },
-});
+export const upsampleFrameLayout = tgpu
+  .bindGroupLayout({
+    frame: { externalTexture: d.textureExternal() },
+  })
+  .$idx(1);
 
-export const upsampleSamplerLayout = tgpu.bindGroupLayout({
-  sampler: { sampler: "filtering" },
-});
+export const upsampleSamplerLayout = tgpu
+  .bindGroupLayout({
+    sampler: { sampler: "filtering" },
+  })
+  .$idx(2);
 
-export const upsampleMaskLayout = tgpu.bindGroupLayout({
-  src: { storage: d.arrayOf(d.f32), access: "readonly" },
-  output: { storageTexture: d.textureStorage2d("rgba16float", "write-only") },
-});
+export const upsampleMaskLayout = tgpu
+  .bindGroupLayout({
+    src: { storage: d.arrayOf(d.f32), access: "readonly" },
+    output: { storageTexture: d.textureStorage2d("rgba16float", "write-only") },
+  })
+  .$idx(3);
 
 const maskCoord = (i: number) => {
   "use gpu";
-  return d.vec2u(i & MODEL_COORD_MASK, std.bitShiftRight(i, MODEL_COORD_SHIFT));
+  return d.vec2u(i & MODEL_COORD_MASK, i >>> MODEL_COORD_SHIFT);
 };
 
 const maskIndex = (coord: d.v2i) => {

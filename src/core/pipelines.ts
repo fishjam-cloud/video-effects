@@ -21,32 +21,46 @@ const COPY_FRAGMENT = /* wgsl */ `
 }
 `;
 
-const BLUR_FRAGMENT = /* wgsl */ `
+// Dual Kawase blur (Bjørge, SIGGRAPH 2015): halve the resolution a few times with five bilinear
+// taps per pass, then double it back with eight. Wide and smooth for a handful of cheap passes,
+// with no uniforms: every tap offset comes from the source texture's own size.
+const DOWNSAMPLE_FRAGMENT = /* wgsl */ `
 @group(0) @binding(0) var sourceTexture: texture_2d<f32>;
 @group(0) @binding(1) var sourceSampler: sampler;
-@group(0) @binding(2) var<uniform> blurParams: vec4f;
 @fragment fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
-  let dimensions = vec2f(textureDimensions(sourceTexture));
-  let step = blurParams.xy * blurParams.z / dimensions;
-  var color = textureSample(sourceTexture, sourceSampler, input.uv) * 0.227027;
-  color += textureSample(sourceTexture, sourceSampler, input.uv + step) * 0.1945946;
-  color += textureSample(sourceTexture, sourceSampler, input.uv - step) * 0.1945946;
-  color += textureSample(sourceTexture, sourceSampler, input.uv + step * 2.0) * 0.1216216;
-  color += textureSample(sourceTexture, sourceSampler, input.uv - step * 2.0) * 0.1216216;
-  color += textureSample(sourceTexture, sourceSampler, input.uv + step * 3.0) * 0.054054;
-  color += textureSample(sourceTexture, sourceSampler, input.uv - step * 3.0) * 0.054054;
-  color += textureSample(sourceTexture, sourceSampler, input.uv + step * 4.0) * 0.016216;
-  color += textureSample(sourceTexture, sourceSampler, input.uv - step * 4.0) * 0.016216;
-  return color;
+  let offset = 1.0 / vec2f(textureDimensions(sourceTexture));
+  var color = textureSample(sourceTexture, sourceSampler, input.uv) * 4.0;
+  color += textureSample(sourceTexture, sourceSampler, input.uv - offset);
+  color += textureSample(sourceTexture, sourceSampler, input.uv + offset);
+  color += textureSample(sourceTexture, sourceSampler, input.uv + vec2f(offset.x, -offset.y));
+  color += textureSample(sourceTexture, sourceSampler, input.uv - vec2f(offset.x, -offset.y));
+  return color / 8.0;
+}
+`;
+
+const UPSAMPLE_FRAGMENT = /* wgsl */ `
+@group(0) @binding(0) var sourceTexture: texture_2d<f32>;
+@group(0) @binding(1) var sourceSampler: sampler;
+@fragment fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
+  let offset = 0.5 / vec2f(textureDimensions(sourceTexture));
+  var color = textureSample(sourceTexture, sourceSampler, input.uv + vec2f(-offset.x * 2.0, 0.0));
+  color += textureSample(sourceTexture, sourceSampler, input.uv + vec2f(-offset.x, offset.y)) * 2.0;
+  color += textureSample(sourceTexture, sourceSampler, input.uv + vec2f(0.0, offset.y * 2.0));
+  color += textureSample(sourceTexture, sourceSampler, input.uv + vec2f(offset.x, offset.y)) * 2.0;
+  color += textureSample(sourceTexture, sourceSampler, input.uv + vec2f(offset.x * 2.0, 0.0));
+  color += textureSample(sourceTexture, sourceSampler, input.uv + vec2f(offset.x, -offset.y)) * 2.0;
+  color += textureSample(sourceTexture, sourceSampler, input.uv + vec2f(0.0, -offset.y * 2.0));
+  color += textureSample(sourceTexture, sourceSampler, input.uv + vec2f(-offset.x, -offset.y)) * 2.0;
+  return color / 12.0;
 }
 `;
 
 const MASK_COMPOSITE_FRAGMENT = /* wgsl */ `
+// 48 bytes, matching the JS-side buffer: a trailing vec3f would pad the struct to 64.
 struct CompositeParams {
   maskRow0: vec4f,
   maskRow1: vec4f,
-  edgeFeather: f32,
-  _padding: vec3f,
+  settings: vec4f,
 };
 @group(0) @binding(0) var sourceTexture: texture_2d<f32>;
 @group(0) @binding(1) var sourceSampler: sampler;
@@ -61,7 +75,8 @@ struct CompositeParams {
     dot(params.maskRow1.xyz, vec3f(input.uv, 1.0)),
   );
   let confidence = textureSample(maskTexture, maskSampler, maskUv).r;
-  let alpha = smoothstep(0.5 - params.edgeFeather, 0.5 + params.edgeFeather, confidence);
+  let edgeFeather = params.settings.x;
+  let alpha = smoothstep(0.5 - edgeFeather, 0.5 + edgeFeather, confidence);
   return mix(textureSample(backgroundTexture, backgroundSampler, input.uv), textureSample(sourceTexture, sourceSampler, input.uv), alpha);
 }
 `;
@@ -152,7 +167,8 @@ export interface BackgroundPipelines {
   readonly textureLayout: GPUBindGroupLayout;
   readonly uniformLayout: GPUBindGroupLayout;
   readonly copy: GPURenderPipeline;
-  readonly blur: GPURenderPipeline;
+  readonly downsample: GPURenderPipeline;
+  readonly upsample: GPURenderPipeline;
   readonly maskComposite: GPURenderPipeline;
   readonly imageComposite: GPURenderPipeline;
 }
@@ -179,12 +195,19 @@ export function createBackgroundPipelines(
       [textures],
       "fishjam-video-effect-copy",
     ),
-    blur: createPipeline(
+    downsample: createPipeline(
       device,
-      BLUR_FRAGMENT,
+      DOWNSAMPLE_FRAGMENT,
       "rgba8unorm",
-      [textures, uniforms],
-      "fishjam-video-effect-blur",
+      [textures],
+      "fishjam-video-effect-blur-downsample",
+    ),
+    upsample: createPipeline(
+      device,
+      UPSAMPLE_FRAGMENT,
+      "rgba8unorm",
+      [textures],
+      "fishjam-video-effect-blur-upsample",
     ),
     maskComposite: createPipeline(
       device,
@@ -236,6 +259,7 @@ export function createTextureBindGroup(
   view: GPUTextureView,
   sampler: GPUSampler,
 ): GPUBindGroup {
+  "worklet";
   return device.createBindGroup({
     layout,
     entries: [
@@ -262,6 +286,7 @@ export function drawFullscreen(
   pipeline: GPURenderPipeline,
   groups: readonly GPUBindGroup[],
 ): void {
+  "worklet";
   const pass = encoder.beginRenderPass({
     colorAttachments: [
       {

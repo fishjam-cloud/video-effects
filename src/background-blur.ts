@@ -1,13 +1,22 @@
 import { useMemo, useRef } from "react";
 
 import { createBackgroundBlurEffect } from "./core/effects";
-import type { BackgroundBlurOptions, VideoEffect } from "./core/types";
+import type {
+  BackgroundBlurFrameOptions,
+  BackgroundBlurOptions,
+  VideoEffect,
+} from "./core/types";
 
 export { createBackgroundBlurEffect } from "./core/effects";
-export type { BackgroundBlurOptions } from "./core/types";
+export type {
+  BackgroundBlurFrameOptions,
+  BackgroundBlurOptions,
+} from "./core/types";
 
 /** A stable effect descriptor; visual option changes update without rebuilds. */
-export function useBackgroundBlur(options: BackgroundBlurOptions): VideoEffect {
+export function useBackgroundBlur(
+  options: BackgroundBlurOptions,
+): VideoEffect<BackgroundBlurFrameOptions> {
   const optionsRef = useRef(options);
   optionsRef.current = options;
   return useMemo(

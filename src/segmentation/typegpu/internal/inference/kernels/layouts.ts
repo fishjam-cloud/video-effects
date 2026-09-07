@@ -103,27 +103,35 @@ export const headShapeConst = tgpu.lazy(() =>
   tgpu.const(HeadShape, headShapeSlot.$),
 );
 
-export const weightedLayout = tgpu.bindGroupLayout({
-  offsets: { uniform: WeightedOffsets },
-  src: { storage: d.arrayOf(d.vec4f), access: "readonly" },
-  weights: { storage: d.arrayOf(d.u32), access: "readonly" },
-  dst: { storage: d.arrayOf(d.vec4f), access: "mutable" },
-});
+export const weightedLayout = tgpu
+  .bindGroupLayout({
+    offsets: { uniform: WeightedOffsets },
+    src: { storage: d.arrayOf(d.vec4f), access: "readonly" },
+    weights: { storage: d.arrayOf(d.u32), access: "readonly" },
+    dst: { storage: d.arrayOf(d.vec4f), access: "mutable" },
+  })
+  .$idx(0);
 
-export const headLayout = tgpu.bindGroupLayout({
-  offsets: { uniform: WeightedOffsets },
-  src: { storage: d.arrayOf(d.vec4f), access: "readonly" },
-  weights: { storage: d.arrayOf(d.u32), access: "readonly" },
-  dst: { storage: d.arrayOf(d.f32), access: "mutable" },
-});
+export const headLayout = tgpu
+  .bindGroupLayout({
+    offsets: { uniform: WeightedOffsets },
+    src: { storage: d.arrayOf(d.vec4f), access: "readonly" },
+    weights: { storage: d.arrayOf(d.u32), access: "readonly" },
+    dst: { storage: d.arrayOf(d.f32), access: "mutable" },
+  })
+  .$idx(0);
 
-export const binaryLayout = tgpu.bindGroupLayout({
-  a: { storage: d.arrayOf(d.vec4f), access: "readonly" },
-  b: { storage: d.arrayOf(d.vec4f), access: "readonly" },
-  dst: { storage: d.arrayOf(d.vec4f), access: "mutable" },
-});
+export const binaryLayout = tgpu
+  .bindGroupLayout({
+    a: { storage: d.arrayOf(d.vec4f), access: "readonly" },
+    b: { storage: d.arrayOf(d.vec4f), access: "readonly" },
+    dst: { storage: d.arrayOf(d.vec4f), access: "mutable" },
+  })
+  .$idx(0);
 
-export const poolLayout = tgpu.bindGroupLayout({
-  src: { storage: d.arrayOf(d.vec4f), access: "readonly" },
-  dst: { storage: d.arrayOf(d.vec4f), access: "mutable" },
-});
+export const poolLayout = tgpu
+  .bindGroupLayout({
+    src: { storage: d.arrayOf(d.vec4f), access: "readonly" },
+    dst: { storage: d.arrayOf(d.vec4f), access: "mutable" },
+  })
+  .$idx(0);

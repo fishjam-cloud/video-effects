@@ -12,33 +12,79 @@ import {
   drawFullscreen,
 } from "./pipelines";
 import type {
+  BackgroundBlurFrameOptions,
   BackgroundBlurOptions,
+  BackgroundImageFrameOptions,
   BackgroundImageOptions,
   PersonMask,
+  PersonSegmentationFrameKernel,
+  PersonSegmentationProvider,
   PersonSegmentationSession,
   SegmentationInput,
   VideoEffectContext,
   VideoEffectFrame,
+  VideoEffectFrameKernel,
+  VideoEffectKernelState,
   VideoEffectSession,
 } from "./types";
 
-type SharedOptions = BackgroundBlurOptions | BackgroundImageOptions;
+const MAX_BLUR_LEVELS = 4;
+// A radius of this many source pixels is one resolution halving; each extra halving doubles it.
+const BLUR_LEVEL_BASE_PIXELS = 3;
 
-interface CommonResources {
+// Sessions are plain state plus worklet functions, not classes: a class instance cannot be
+// copied onto a worklet runtime, and mobile encodes every frame on the camera thread. All
+// per-frame work below takes the state explicitly so that a caller holding one copy of it can
+// drive `offer` and `encode` against the same data.
+
+interface CommonState extends VideoEffectKernelState {
+  readonly device: GPUDevice;
+  readonly width: number;
+  readonly height: number;
   readonly pipelines: BackgroundPipelines;
   readonly compositeParams: GPUBuffer;
   readonly compositeParamsGroup: GPUBindGroup;
-  sourceView?: GPUTextureView;
-  sourceGroup?: GPUBindGroup;
-  maskView?: GPUTextureView;
-  maskGroup?: GPUBindGroup;
+  segmentation: PersonSegmentationFrameKernel | null;
+  sourceView: GPUTextureView | null;
+  sourceGroup: GPUBindGroup | null;
+  maskView: GPUTextureView | null;
+  maskGroup: GPUBindGroup | null;
 }
 
+/** One rung of the blur's resolution ladder: half the size of the rung above it. */
+interface BlurLevel {
+  readonly texture: GPUTexture;
+  readonly view: GPUTextureView;
+  readonly width: number;
+  readonly height: number;
+  readonly group: GPUBindGroup;
+}
+
+interface BlurState extends CommonState {
+  readonly effectId: "fishjam.background-blur";
+  /** Index 0 is half resolution; every next level halves again. */
+  readonly blurLevels: BlurLevel[];
+}
+
+interface ImageState extends CommonState {
+  readonly effectId: "fishjam.background-image";
+  readonly imageParams: GPUBuffer;
+  readonly imageParamsGroup: GPUBindGroup;
+  image: LoadedImageTexture | null;
+  imageGroup: GPUBindGroup | null;
+}
+
+// ---------------------------------------------------------------------------
+// Per-frame work shared by both effects (worklets).
+// ---------------------------------------------------------------------------
+
 function currentMask(
-  session: PersonSegmentationSession | null,
+  segmentation: PersonSegmentationFrameKernel | null,
   timestampUs: number,
 ): PersonMask | null {
-  const mask = session?.latest(timestampUs) ?? null;
+  "worklet";
+  if (segmentation == null) return null;
+  const mask = segmentation.latest(segmentation.state, timestampUs);
   return mask != null && timestampUs - mask.timestampUs <= MASK_MAX_AGE_US
     ? mask
     : null;
@@ -50,6 +96,7 @@ function writeMaskParams(
   mask: PersonMask,
   edgeFeather: number,
 ): void {
+  "worklet";
   const transform = mask.sourceUvToMaskUv;
   device.queue.writeBuffer(
     buffer,
@@ -71,380 +118,137 @@ function writeMaskParams(
   );
 }
 
-abstract class BaseBackgroundSession<
-  Options extends SharedOptions,
-> implements VideoEffectSession {
-  protected readonly device: GPUDevice;
-  protected readonly width: number;
-  protected readonly height: number;
-  protected readonly getOptions: () => Options;
-  protected readonly common: CommonResources;
-  protected segmentation: PersonSegmentationSession | null = null;
-  private disposed = false;
-
-  constructor(context: VideoEffectContext, getOptions: () => Options) {
-    this.device = context.device;
-    this.width = context.width;
-    this.height = context.height;
-    this.getOptions = getOptions;
-    const pipelines = createBackgroundPipelines(
-      context.device,
-      context.outputFormat,
-    );
-    const compositeParams = createUniformBuffer(
-      context.device,
-      48,
-      "fishjam-video-effect-mask-params",
-    );
-    this.common = {
-      pipelines,
-      compositeParams,
-      compositeParamsGroup: createUniformBindGroup(
-        context.device,
-        pipelines.uniformLayout,
-        compositeParams,
-      ),
-    };
-  }
-
-  async initialize(context: VideoEffectContext): Promise<void> {
-    context.onStatus?.("loading");
-    try {
-      this.segmentation = await this.getOptions().segmentation.prepare({
-        device: context.device,
-        outputWidth: context.width,
-        outputHeight: context.height,
-        onStatus: context.onStatus,
-      });
-      context.onStatus?.("ready");
-    } catch (cause) {
-      context.onStatus?.("error", asError(cause));
-    }
-  }
-
-  offer(input: SegmentationInput): void {
-    if (!this.disposed) this.segmentation?.offer(input);
-  }
-
-  encode(frame: VideoEffectFrame): void {
-    if (this.disposed) return;
-    const options = this.getOptions();
-    const mask =
-      options.enabled === false
-        ? null
-        : currentMask(this.segmentation, frame.timestampUs);
-    if (mask == null) {
-      this.encodeCopy(frame);
-      return;
-    }
-    this.encodeEffect(frame, mask, options);
-  }
-
-  reset(): void {
-    this.segmentation?.reset();
-  }
-
-  dispose(): void {
-    if (this.disposed) return;
-    this.disposed = true;
-    this.segmentation?.dispose();
-    this.segmentation = null;
-    this.common.compositeParams.destroy();
-  }
-
-  protected sourceGroup(source: GPUTextureView): GPUBindGroup {
-    if (this.common.sourceView !== source) {
-      this.common.sourceView = source;
-      this.common.sourceGroup = createTextureBindGroup(
-        this.device,
-        this.common.pipelines.textureLayout,
-        source,
-        this.common.pipelines.sampler,
-      );
-    }
-    return this.common.sourceGroup!;
-  }
-
-  protected maskGroup(mask: PersonMask): GPUBindGroup {
-    if (this.common.maskView !== mask.texture) {
-      this.common.maskView = mask.texture;
-      this.common.maskGroup = createTextureBindGroup(
-        this.device,
-        this.common.pipelines.textureLayout,
-        mask.texture,
-        this.common.pipelines.sampler,
-      );
-    }
-    return this.common.maskGroup!;
-  }
-
-  protected encodeCopy(frame: VideoEffectFrame): void {
-    drawFullscreen(
-      frame.commandEncoder,
-      frame.output,
-      this.common.pipelines.copy,
-      [this.sourceGroup(frame.source)],
+function sourceGroupFor(
+  state: CommonState,
+  source: GPUTextureView,
+): GPUBindGroup {
+  "worklet";
+  if (state.sourceGroup == null || state.sourceView !== source) {
+    state.sourceView = source;
+    state.sourceGroup = createTextureBindGroup(
+      state.device,
+      state.pipelines.textureLayout,
+      source,
+      state.pipelines.sampler,
     );
   }
-
-  protected writeCommonMaskParams(
-    mask: PersonMask,
-    options: SharedOptions,
-  ): void {
-    writeMaskParams(
-      this.device,
-      this.common.compositeParams,
-      mask,
-      clamp(options.edgeFeather, 0, 0.5, 0.08),
-    );
-  }
-
-  protected abstract encodeEffect(
-    frame: VideoEffectFrame,
-    mask: PersonMask,
-    options: Options,
-  ): void;
+  return state.sourceGroup;
 }
 
-export class BackgroundBlurSession extends BaseBackgroundSession<BackgroundBlurOptions> {
-  private readonly blurX: { texture: GPUTexture; view: GPUTextureView };
-  private readonly blurY: { texture: GPUTexture; view: GPUTextureView };
-  private readonly horizontalBlurParams: GPUBuffer;
-  private readonly verticalBlurParams: GPUBuffer;
-  private readonly horizontalBlurParamsGroup: GPUBindGroup;
-  private readonly verticalBlurParamsGroup: GPUBindGroup;
-  private blurXGroup: GPUBindGroup | null = null;
-
-  constructor(
-    context: VideoEffectContext,
-    getOptions: () => BackgroundBlurOptions,
-  ) {
-    super(context, getOptions);
-    const width = Math.max(1, Math.ceil(context.width / 4));
-    const height = Math.max(1, Math.ceil(context.height / 4));
-    this.blurX = createSampleTexture(
-      context.device,
-      width,
-      height,
-      "fishjam-video-effect-blur-x",
-    );
-    this.blurY = createSampleTexture(
-      context.device,
-      width,
-      height,
-      "fishjam-video-effect-blur-y",
-    );
-    this.horizontalBlurParams = createUniformBuffer(
-      context.device,
-      16,
-      "fishjam-video-effect-blur-horizontal-params",
-    );
-    this.verticalBlurParams = createUniformBuffer(
-      context.device,
-      16,
-      "fishjam-video-effect-blur-vertical-params",
-    );
-    this.horizontalBlurParamsGroup = createUniformBindGroup(
-      context.device,
-      this.common.pipelines.uniformLayout,
-      this.horizontalBlurParams,
-    );
-    this.verticalBlurParamsGroup = createUniformBindGroup(
-      context.device,
-      this.common.pipelines.uniformLayout,
-      this.verticalBlurParams,
+function maskGroupFor(state: CommonState, mask: PersonMask): GPUBindGroup {
+  "worklet";
+  if (state.maskGroup == null || state.maskView !== mask.texture) {
+    state.maskView = mask.texture;
+    state.maskGroup = createTextureBindGroup(
+      state.device,
+      state.pipelines.textureLayout,
+      mask.texture,
+      state.pipelines.sampler,
     );
   }
-
-  protected encodeEffect(
-    frame: VideoEffectFrame,
-    mask: PersonMask,
-    options: BackgroundBlurOptions,
-  ): void {
-    const radius = clamp(options.radius, 0, 40, 18);
-    if (radius === 0) {
-      this.encodeCopy(frame);
-      return;
-    }
-    const sourceGroup = this.sourceGroup(frame.source);
-    this.device.queue.writeBuffer(
-      this.horizontalBlurParams,
-      0,
-      new Float32Array([1, 0, radius * 0.2, 0]),
-    );
-    drawFullscreen(
-      frame.commandEncoder,
-      this.blurX.view,
-      this.common.pipelines.blur,
-      [sourceGroup, this.horizontalBlurParamsGroup],
-    );
-
-    this.blurXGroup ??= createTextureBindGroup(
-      this.device,
-      this.common.pipelines.textureLayout,
-      this.blurX.view,
-      this.common.pipelines.sampler,
-    );
-    this.device.queue.writeBuffer(
-      this.verticalBlurParams,
-      0,
-      new Float32Array([0, 1, radius * 0.25, 0]),
-    );
-    drawFullscreen(
-      frame.commandEncoder,
-      this.blurY.view,
-      this.common.pipelines.blur,
-      [this.blurXGroup, this.verticalBlurParamsGroup],
-    );
-
-    this.writeCommonMaskParams(mask, options);
-    const blurredGroup = createTextureBindGroup(
-      this.device,
-      this.common.pipelines.textureLayout,
-      this.blurY.view,
-      this.common.pipelines.sampler,
-    );
-    drawFullscreen(
-      frame.commandEncoder,
-      frame.output,
-      this.common.pipelines.maskComposite,
-      [
-        sourceGroup,
-        blurredGroup,
-        this.maskGroup(mask),
-        this.common.compositeParamsGroup,
-      ],
-    );
-  }
-
-  override dispose(): void {
-    super.dispose();
-    this.horizontalBlurParams.destroy();
-    this.verticalBlurParams.destroy();
-    this.blurX.texture.destroy();
-    this.blurY.texture.destroy();
-  }
+  return state.maskGroup;
 }
 
-export class BackgroundImageSession extends BaseBackgroundSession<BackgroundImageOptions> {
-  private readonly imageParams: GPUBuffer;
-  private readonly imageParamsGroup: GPUBindGroup;
-  private image: LoadedImageTexture | null = null;
-  private imageGroup: GPUBindGroup | null = null;
-  private imageSource: BackgroundImageOptions["image"] | null = null;
-  private loadingImage: Promise<void> | null = null;
+function encodeCopy(state: CommonState, frame: VideoEffectFrame): void {
+  "worklet";
+  drawFullscreen(frame.commandEncoder, frame.output, state.pipelines.copy, [
+    sourceGroupFor(state, frame.source),
+  ]);
+}
 
-  constructor(
-    context: VideoEffectContext,
-    getOptions: () => BackgroundImageOptions,
-  ) {
-    super(context, getOptions);
-    this.imageParams = createUniformBuffer(
-      context.device,
-      80,
-      "fishjam-video-effect-image-params",
-    );
-    this.imageParamsGroup = createUniformBindGroup(
-      context.device,
-      this.common.pipelines.uniformLayout,
-      this.imageParams,
-    );
-    void this.ensureImage(getOptions().image);
+function offerToSegmentation(
+  state: VideoEffectKernelState,
+  input: SegmentationInput,
+): void {
+  "worklet";
+  const common = state as CommonState;
+  if (common.segmentation == null) return;
+  common.segmentation.offer(common.segmentation.state, input);
+}
+
+function resetSegmentation(state: VideoEffectKernelState): void {
+  "worklet";
+  const common = state as CommonState;
+  if (common.segmentation == null) return;
+  common.segmentation.reset(common.segmentation.state);
+}
+
+// ---------------------------------------------------------------------------
+// Background blur.
+// ---------------------------------------------------------------------------
+
+/** How many resolution halvings a blur radius (in source pixels) calls for. */
+function blurLevelsFor(radius: number, maxLevels: number): number {
+  "worklet";
+  if (radius <= 0) return 0;
+  const levels = Math.round(Math.log2(radius / BLUR_LEVEL_BASE_PIXELS));
+  return Math.min(maxLevels, Math.max(1, levels));
+}
+
+function encodeBlurFrame(
+  state: VideoEffectKernelState,
+  frame: VideoEffectFrame,
+  options: BackgroundBlurFrameOptions,
+): void {
+  "worklet";
+  const blur = state as BlurState;
+  const mask =
+    options.enabled === false
+      ? null
+      : currentMask(blur.segmentation, frame.timestampUs);
+  const levels = blurLevelsFor(
+    clamp(options.radius, 0, 40, 18),
+    blur.blurLevels.length,
+  );
+  if (mask == null || levels === 0) {
+    encodeCopy(blur, frame);
+    return;
   }
 
-  protected encodeEffect(
-    frame: VideoEffectFrame,
-    mask: PersonMask,
-    options: BackgroundImageOptions,
-  ): void {
-    if (!sameImageSource(this.imageSource, options.image))
-      void this.ensureImage(options.image);
-    if (this.image == null || this.imageGroup == null) {
-      this.encodeCopy(frame);
-      return;
-    }
-    const fit = imageTransform(
-      this.width,
-      this.height,
-      this.image.width,
-      this.image.height,
-      options.fit ?? "cover",
-    );
-    const transform = mask.sourceUvToMaskUv;
-    const backgroundColor = options.backgroundColor ?? [0, 0, 0, 1];
-    this.device.queue.writeBuffer(
-      this.imageParams,
-      0,
-      new Float32Array([
-        transform[0] ?? 1,
-        transform[1] ?? 0,
-        transform[2] ?? 0,
-        0,
-        transform[3] ?? 0,
-        transform[4] ?? 1,
-        transform[5] ?? 0,
-        0,
-        fit.scaleX,
-        fit.scaleY,
-        fit.offsetX,
-        fit.offsetY,
-        clamp(options.edgeFeather, 0, 0.5, 0.08),
-        fit.contains ? 1 : 0,
-        0,
-        0,
-        backgroundColor[0],
-        backgroundColor[1],
-        backgroundColor[2],
-        backgroundColor[3],
-      ]),
-    );
+  // Dual Kawase: walk down the resolution ladder, then back up. The blur radius doubles with
+  // every level; the composite reads the half-resolution top rung with bilinear filtering.
+  const sourceGroup = sourceGroupFor(blur, frame.source);
+  let readGroup = sourceGroup;
+  for (let index = 0; index < levels; index += 1) {
     drawFullscreen(
       frame.commandEncoder,
-      frame.output,
-      this.common.pipelines.imageComposite,
-      [
-        this.sourceGroup(frame.source),
-        this.imageGroup,
-        this.maskGroup(mask),
-        this.imageParamsGroup,
-      ],
+      blur.blurLevels[index].view,
+      blur.pipelines.downsample,
+      [readGroup],
+    );
+    readGroup = blur.blurLevels[index].group;
+  }
+  for (let index = levels - 1; index >= 1; index -= 1) {
+    drawFullscreen(
+      frame.commandEncoder,
+      blur.blurLevels[index - 1].view,
+      blur.pipelines.upsample,
+      [blur.blurLevels[index].group],
     );
   }
 
-  override dispose(): void {
-    super.dispose();
-    this.imageParams.destroy();
-    this.image?.texture.destroy();
-    this.image = null;
-  }
-
-  private async ensureImage(
-    source: BackgroundImageOptions["image"],
-  ): Promise<void> {
-    if (this.loadingImage != null || sameImageSource(this.imageSource, source))
-      return;
-    this.loadingImage = loadImageTexture(this.device, source)
-      .then((image) => {
-        const previous = this.image;
-        this.image = image;
-        this.imageSource = source;
-        this.imageGroup = createTextureBindGroup(
-          this.device,
-          this.common.pipelines.textureLayout,
-          image.view,
-          this.common.pipelines.sampler,
-        );
-        previous?.texture.destroy();
-      })
-      .catch(() => {
-        // The effect remains a passthrough until the caller supplies a valid image.
-      })
-      .finally(() => {
-        this.loadingImage = null;
-      });
-    await this.loadingImage;
-  }
+  writeMaskParams(
+    blur.device,
+    blur.compositeParams,
+    mask,
+    clamp(options.edgeFeather, 0, 0.5, 0.08),
+  );
+  drawFullscreen(
+    frame.commandEncoder,
+    frame.output,
+    blur.pipelines.maskComposite,
+    [
+      sourceGroup,
+      blur.blurLevels[0].group,
+      maskGroupFor(blur, mask),
+      blur.compositeParamsGroup,
+    ],
+  );
 }
+
+// ---------------------------------------------------------------------------
+// Background image.
+// ---------------------------------------------------------------------------
 
 function imageTransform(
   outputWidth: number,
@@ -453,6 +257,7 @@ function imageTransform(
   imageHeight: number,
   fit: "cover" | "contain",
 ) {
+  "worklet";
   const outputAspect = outputWidth / outputHeight;
   const imageAspect = imageWidth / imageHeight;
   if (fit === "cover") {
@@ -495,6 +300,300 @@ function imageTransform(
   };
 }
 
+function encodeImageFrame(
+  state: VideoEffectKernelState,
+  frame: VideoEffectFrame,
+  options: BackgroundImageFrameOptions,
+): void {
+  "worklet";
+  const image = state as ImageState;
+  const mask =
+    options.enabled === false
+      ? null
+      : currentMask(image.segmentation, frame.timestampUs);
+  if (mask == null || image.image == null || image.imageGroup == null) {
+    encodeCopy(image, frame);
+    return;
+  }
+  const fit = imageTransform(
+    image.width,
+    image.height,
+    image.image.width,
+    image.image.height,
+    options.fit ?? "cover",
+  );
+  const transform = mask.sourceUvToMaskUv;
+  const backgroundColor = options.backgroundColor ?? [0, 0, 0, 1];
+  image.device.queue.writeBuffer(
+    image.imageParams,
+    0,
+    new Float32Array([
+      transform[0] ?? 1,
+      transform[1] ?? 0,
+      transform[2] ?? 0,
+      0,
+      transform[3] ?? 0,
+      transform[4] ?? 1,
+      transform[5] ?? 0,
+      0,
+      fit.scaleX,
+      fit.scaleY,
+      fit.offsetX,
+      fit.offsetY,
+      clamp(options.edgeFeather, 0, 0.5, 0.08),
+      fit.contains ? 1 : 0,
+      0,
+      0,
+      backgroundColor[0],
+      backgroundColor[1],
+      backgroundColor[2],
+      backgroundColor[3],
+    ]),
+  );
+  drawFullscreen(
+    frame.commandEncoder,
+    frame.output,
+    image.pipelines.imageComposite,
+    [
+      sourceGroupFor(image, frame.source),
+      image.imageGroup,
+      maskGroupFor(image, mask),
+      image.imageParamsGroup,
+    ],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Session construction (JS thread).
+// ---------------------------------------------------------------------------
+
+function createCommonState(
+  context: VideoEffectContext,
+): Omit<CommonState, "effectId"> {
+  const pipelines = createBackgroundPipelines(
+    context.device,
+    context.outputFormat,
+  );
+  const compositeParams = createUniformBuffer(
+    context.device,
+    48,
+    "fishjam-video-effect-mask-params",
+  );
+  return {
+    device: context.device,
+    width: context.width,
+    height: context.height,
+    pipelines,
+    compositeParams,
+    compositeParamsGroup: createUniformBindGroup(
+      context.device,
+      pipelines.uniformLayout,
+      compositeParams,
+    ),
+    segmentation: null,
+    sourceView: null,
+    sourceGroup: null,
+    maskView: null,
+    maskGroup: null,
+  };
+}
+
+/**
+ * Prepares the segmentation provider and attaches its frame kernel to the state. A failure is
+ * reported through `onStatus` and leaves the effect as a passthrough, so the caller still gets
+ * a usable session.
+ */
+async function prepareSegmentation(
+  state: CommonState,
+  context: VideoEffectContext,
+  provider: PersonSegmentationProvider,
+): Promise<PersonSegmentationSession | null> {
+  context.onStatus?.("loading");
+  try {
+    const session = await provider.prepare({
+      device: context.device,
+      outputWidth: context.width,
+      outputHeight: context.height,
+      onStatus: context.onStatus,
+    });
+    state.segmentation = session.frameKernel;
+    context.onStatus?.("ready");
+    return session;
+  } catch (cause) {
+    context.onStatus?.("error", asError(cause));
+    return null;
+  }
+}
+
+function disposeCommon(
+  state: CommonState,
+  segmentation: PersonSegmentationSession | null,
+): void {
+  segmentation?.dispose();
+  state.compositeParams.destroy();
+}
+
+export async function createBackgroundBlurSession(
+  context: VideoEffectContext,
+  getOptions: () => BackgroundBlurOptions,
+): Promise<VideoEffectSession<BackgroundBlurFrameOptions>> {
+  const common = createCommonState(context);
+  const blurLevels: BlurLevel[] = [];
+  for (let index = 0; index < MAX_BLUR_LEVELS; index += 1) {
+    const divisor = 2 ** (index + 1);
+    const width = Math.max(1, Math.floor(context.width / divisor));
+    const height = Math.max(1, Math.floor(context.height / divisor));
+    const { texture, view } = createSampleTexture(
+      context.device,
+      width,
+      height,
+      `fishjam-video-effect-blur-level-${index}`,
+    );
+    blurLevels.push({
+      texture,
+      view,
+      width,
+      height,
+      group: createTextureBindGroup(
+        context.device,
+        common.pipelines.textureLayout,
+        view,
+        common.pipelines.sampler,
+      ),
+    });
+  }
+  const state: BlurState = {
+    ...common,
+    effectId: "fishjam.background-blur",
+    blurLevels,
+  };
+  const segmentation = await prepareSegmentation(
+    state,
+    context,
+    getOptions().segmentation,
+  );
+  const frameKernel: VideoEffectFrameKernel<BackgroundBlurFrameOptions> = {
+    state,
+    offer: offerToSegmentation,
+    encode: encodeBlurFrame,
+    reset: resetSegmentation,
+  };
+  // Disposal is tracked here, not in `state`: the state may already have been copied to a
+  // worklet runtime, and mutating it afterwards neither reaches that copy nor is allowed.
+  let disposed = false;
+  return {
+    frameKernel,
+    offer: (input) => {
+      if (!disposed) offerToSegmentation(state, input);
+    },
+    encode: (frame) => {
+      if (!disposed) encodeBlurFrame(state, frame, getOptions());
+    },
+    reset: () => {
+      if (!disposed) resetSegmentation(state);
+    },
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      disposeCommon(state, segmentation);
+      for (const level of state.blurLevels) level.texture.destroy();
+    },
+  };
+}
+
+export async function createBackgroundImageSession(
+  context: VideoEffectContext,
+  getOptions: () => BackgroundImageOptions,
+): Promise<VideoEffectSession<BackgroundImageFrameOptions>> {
+  const imageParams = createUniformBuffer(
+    context.device,
+    80,
+    "fishjam-video-effect-image-params",
+  );
+  const common = createCommonState(context);
+  const state: ImageState = {
+    ...common,
+    effectId: "fishjam.background-image",
+    imageParams,
+    imageParamsGroup: createUniformBindGroup(
+      context.device,
+      common.pipelines.uniformLayout,
+      imageParams,
+    ),
+    image: null,
+    imageGroup: null,
+  };
+
+  // The image is decoded on the JS thread. Replacing it later updates this state in place,
+  // which a worklet runtime holding its own copy will not observe.
+  let imageSource: BackgroundImageOptions["image"] | null = null;
+  let loadingImage: Promise<void> | null = null;
+  const ensureImage = (
+    source: BackgroundImageOptions["image"],
+  ): Promise<void> => {
+    if (loadingImage != null || sameImageSource(imageSource, source)) {
+      return loadingImage ?? Promise.resolve();
+    }
+    loadingImage = loadImageTexture(context.device, source)
+      .then((image) => {
+        const previous = state.image;
+        state.image = image;
+        imageSource = source;
+        state.imageGroup = createTextureBindGroup(
+          context.device,
+          state.pipelines.textureLayout,
+          image.view,
+          state.pipelines.sampler,
+        );
+        previous?.texture.destroy();
+      })
+      .catch(() => {
+        // The effect remains a passthrough until the caller supplies a valid image.
+      })
+      .finally(() => {
+        loadingImage = null;
+      });
+    return loadingImage;
+  };
+
+  const [segmentation] = await Promise.all([
+    prepareSegmentation(state, context, getOptions().segmentation),
+    ensureImage(getOptions().image),
+  ]);
+  const frameKernel: VideoEffectFrameKernel<BackgroundImageFrameOptions> = {
+    state,
+    offer: offerToSegmentation,
+    encode: encodeImageFrame,
+    reset: resetSegmentation,
+  };
+  let disposed = false;
+  return {
+    frameKernel,
+    offer: (input) => {
+      if (!disposed) offerToSegmentation(state, input);
+    },
+    encode: (frame) => {
+      if (disposed) return;
+      const options = getOptions();
+      if (!sameImageSource(imageSource, options.image)) {
+        void ensureImage(options.image);
+      }
+      encodeImageFrame(state, frame, options);
+    },
+    reset: () => {
+      if (!disposed) resetSegmentation(state);
+    },
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      disposeCommon(state, segmentation);
+      state.imageParams.destroy();
+      state.image?.texture.destroy();
+      state.image = null;
+    },
+  };
+}
+
 function sameImageSource(
   left: BackgroundImageOptions["image"] | null,
   right: BackgroundImageOptions["image"],
@@ -509,22 +608,4 @@ function sameImageSource(
 
 function asError(cause: unknown): Error {
   return cause instanceof Error ? cause : new Error(String(cause));
-}
-
-export async function createBackgroundBlurSession(
-  context: VideoEffectContext,
-  getOptions: () => BackgroundBlurOptions,
-): Promise<VideoEffectSession> {
-  const session = new BackgroundBlurSession(context, getOptions);
-  await session.initialize(context);
-  return session;
-}
-
-export async function createBackgroundImageSession(
-  context: VideoEffectContext,
-  getOptions: () => BackgroundImageOptions,
-): Promise<VideoEffectSession> {
-  const session = new BackgroundImageSession(context, getOptions);
-  await session.initialize(context);
-  return session;
 }

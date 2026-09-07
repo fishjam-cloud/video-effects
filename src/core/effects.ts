@@ -3,7 +3,9 @@ import {
   createBackgroundImageSession,
 } from "./backgroundSessions";
 import type {
+  BackgroundBlurFrameOptions,
   BackgroundBlurOptions,
+  BackgroundImageFrameOptions,
   BackgroundImageOptions,
   VideoEffect,
 } from "./types";
@@ -11,7 +13,7 @@ import type {
 /** Creates a model-free background blur descriptor. */
 export function createBackgroundBlurEffect(
   getOptions: () => BackgroundBlurOptions,
-): VideoEffect {
+): VideoEffect<BackgroundBlurFrameOptions> {
   return {
     id: "fishjam.background-blur",
     get segmentationInput() {
@@ -24,7 +26,7 @@ export function createBackgroundBlurEffect(
 /** Creates a model-free image-background descriptor. */
 export function createBackgroundImageEffect(
   getOptions: () => BackgroundImageOptions,
-): VideoEffect {
+): VideoEffect<BackgroundImageFrameOptions> {
   return {
     id: "fishjam.background-image",
     get segmentationInput() {

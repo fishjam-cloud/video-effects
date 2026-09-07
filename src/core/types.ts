@@ -50,11 +50,37 @@ export interface PersonMask {
   readonly sourceUvToMaskUv: Float32Array;
 }
 
+/**
+ * Plain-data state of a segmentation session. It holds only numbers, strings and GPU objects,
+ * so a worklet runtime can copy it; pass it back into every {@link PersonSegmentationFrameKernel}
+ * call.
+ */
+export interface PersonSegmentationKernelState {
+  readonly providerId: string;
+}
+
+/**
+ * The per-frame entry points of a segmentation session as standalone worklet functions.
+ * Use this instead of the session methods when frames are processed on another JS runtime
+ * (for example a camera thread): capture the kernel once and call its functions with
+ * `kernel.state`.
+ */
+export interface PersonSegmentationFrameKernel {
+  readonly state: PersonSegmentationKernelState;
+  offer(state: PersonSegmentationKernelState, input: SegmentationInput): void;
+  latest(
+    state: PersonSegmentationKernelState,
+    renderTimestampUs: number,
+  ): PersonMask | null;
+  reset(state: PersonSegmentationKernelState): void;
+}
+
 export interface PersonSegmentationSession {
   offer(frame: SegmentationInput): void;
   latest(renderTimestampUs: number): PersonMask | null;
   reset(): void;
   dispose(): void;
+  readonly frameKernel: PersonSegmentationFrameKernel;
 }
 
 export interface PersonSegmentationProvider {
@@ -80,17 +106,43 @@ export interface VideoEffectFrame {
   readonly externalTexture?: GPUExternalTexture;
 }
 
-export interface VideoEffectSession {
+/**
+ * Plain-data state of an effect session; see {@link PersonSegmentationKernelState}.
+ */
+export interface VideoEffectKernelState {
+  readonly effectId: string;
+}
+
+/**
+ * The per-frame entry points of an effect session as standalone worklet functions, for callers
+ * that encode frames on another JS runtime. `FrameOptions` are the effect's visual options,
+ * supplied on every call because a copied state cannot observe later changes.
+ */
+export interface VideoEffectFrameKernel<FrameOptions = unknown> {
+  readonly state: VideoEffectKernelState;
+  offer(state: VideoEffectKernelState, input: SegmentationInput): void;
+  encode(
+    state: VideoEffectKernelState,
+    frame: VideoEffectFrame,
+    options: FrameOptions,
+  ): void;
+  reset(state: VideoEffectKernelState): void;
+}
+
+export interface VideoEffectSession<FrameOptions = unknown> {
   encode(frame: VideoEffectFrame): void;
   offer(input: SegmentationInput): void;
   reset(): void;
   dispose(): void;
+  readonly frameKernel: VideoEffectFrameKernel<FrameOptions>;
 }
 
-export interface VideoEffect {
+export interface VideoEffect<FrameOptions = unknown> {
   readonly id: string;
   readonly segmentationInput: SegmentationInputKind;
-  create(context: VideoEffectContext): Promise<VideoEffectSession>;
+  create(
+    context: VideoEffectContext,
+  ): Promise<VideoEffectSession<FrameOptions>>;
 }
 
 export interface SegmentationOptions {
@@ -103,6 +155,12 @@ export interface BackgroundBlurOptions extends SegmentationOptions {
   readonly radius?: number;
 }
 
+/** The blur options read on every frame: everything except the segmentation provider. */
+export type BackgroundBlurFrameOptions = Omit<
+  BackgroundBlurOptions,
+  "segmentation"
+>;
+
 export interface VideoEffectImageSource {
   readonly uri?: string;
   readonly data?: ArrayBuffer | ArrayBufferView;
@@ -114,3 +172,12 @@ export interface BackgroundImageOptions extends SegmentationOptions {
   readonly fit?: "cover" | "contain";
   readonly backgroundColor?: readonly [number, number, number, number];
 }
+
+/**
+ * The image-background options read on every frame: everything except the segmentation
+ * provider and the image itself, which is decoded once on the JS thread.
+ */
+export type BackgroundImageFrameOptions = Omit<
+  BackgroundImageOptions,
+  "segmentation" | "image"
+>;

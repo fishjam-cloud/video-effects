@@ -1,15 +1,6 @@
 // @ts-nocheck
 /** Builds the fixed segmentation graph and records worklet-safe GPU commands. */
-import tgpu, {
-  common,
-  d,
-  std,
-  type TgpuBindGroup,
-  type TgpuBindGroupLayout,
-  type TgpuRenderPipeline,
-  type TgpuRoot,
-  type TgpuUniform,
-} from "typegpu";
+import tgpu, { d, std, type TgpuRoot } from "typegpu";
 
 import { FrameCropParams, initialFrameCropParams } from "./frame";
 import type { SegmenterPlan } from "./inference/bundle";
@@ -55,16 +46,22 @@ const MODEL_COORD_MASK = MODEL_WIDTH - 1;
 const MODEL_COORD_SHIFT = 8;
 const MODEL_SIZE = d.vec2f(MODEL_WIDTH, MODEL_HEIGHT);
 
-const videoFrameParamsLayout = tgpu.bindGroupLayout({
-  params: { uniform: FrameCropParams },
-});
-const videoFrameFrameLayout = tgpu.bindGroupLayout({
-  frame: { externalTexture: d.textureExternal() },
-});
-const videoFrameOutputLayout = tgpu.bindGroupLayout({
-  sampler: { sampler: "filtering" },
-  dst: { storage: d.arrayOf(d.vec4f), access: "mutable" },
-});
+const videoFrameParamsLayout = tgpu
+  .bindGroupLayout({
+    params: { uniform: FrameCropParams },
+  })
+  .$idx(0);
+const videoFrameFrameLayout = tgpu
+  .bindGroupLayout({
+    frame: { externalTexture: d.textureExternal() },
+  })
+  .$idx(1);
+const videoFrameOutputLayout = tgpu
+  .bindGroupLayout({
+    sampler: { sampler: "filtering" },
+    dst: { storage: d.arrayOf(d.vec4f), access: "mutable" },
+  })
+  .$idx(2);
 
 const videoPreprocessKernel = tgpu.computeFn({
   in: { gid: d.builtin.globalInvocationId },
@@ -76,10 +73,7 @@ const videoPreprocessKernel = tgpu.computeFn({
     return;
   }
 
-  const coord = d.vec2u(
-    i & MODEL_COORD_MASK,
-    std.bitShiftRight(i, MODEL_COORD_SHIFT),
-  );
+  const coord = d.vec2u(i & MODEL_COORD_MASK, i >>> MODEL_COORD_SHIFT);
   const pixel = d.vec2f(coord) + 0.5;
   const cropUv = d.vec2f(MODEL_SIZE.x - pixel.x, pixel.y) / MODEL_SIZE;
   const sourceUv =
@@ -96,21 +90,6 @@ const videoPreprocessKernel = tgpu.computeFn({
   );
 
   videoFrameOutputLayout.$.dst[i] = d.vec4f(color.rgb, 0);
-});
-
-// ---------------------------------------------------------------------------
-// Composite render (camera + mask + synthetic gradient background) → IOSurface.
-// Ported from the example's `compositeFragment`, but the color attachment is the
-// IOSurface texture view (supplied per-frame in the worklet), NOT a canvas.
-// ---------------------------------------------------------------------------
-const PERSON_ALPHA_LOW = 0.35;
-const PERSON_ALPHA_HIGH = 0.65;
-
-const compositeFrameLayout = tgpu.bindGroupLayout({
-  frame: { externalTexture: d.textureExternal() },
-});
-const compositeMaskLayout = tgpu.bindGroupLayout({
-  mask: { texture: d.texture2d() },
 });
 
 // ---------------------------------------------------------------------------
@@ -145,16 +124,6 @@ export interface SegmentationBundle {
   readonly upsampleParamsBuffer: GPUBuffer;
   /** Uniform buffer for PostProcessParams (temporal `initialized` flag). */
   readonly postProcessParamsBuffer: GPUBuffer;
-
-  // ---- Composite render (replayed natively in the worklet). ----
-  readonly compositePipeline: GPURenderPipeline;
-  readonly compositeFrameLayout: GPUBindGroupLayout;
-  /** Static composite group(s): the mask texture + the composite uniform. */
-  readonly compositeStaticGroups: { index: number; bindGroup: GPUBindGroup }[];
-  /** Group index where the worklet binds the composite external-texture group. */
-  readonly compositeFrameGroupIndex: number;
-  /** Uniform buffer for the composite FrameCropParams (crop/orientation). */
-  readonly compositeParamsBuffer: GPUBuffer;
 }
 
 /**
@@ -282,81 +251,6 @@ export function buildSegmentationBundle(
   const upsampleWorkgroupsX = Math.ceil(outputSize / UPSAMPLE_WORKGROUP_SIZE);
   const upsampleWorkgroupsY = Math.ceil(outputSize / UPSAMPLE_WORKGROUP_SIZE);
 
-  // ---- Composite render pipeline. ----
-  const compositeUniform = root.createUniform(
-    FrameCropParams,
-    initialFrameCropParams,
-  );
-  const compositeSampler = root.createSampler({
-    magFilter: "linear",
-    minFilter: "linear",
-  });
-
-  const sampleMask = (uv: d.v2f) => {
-    "use gpu";
-    return std.textureSample(compositeMaskLayout.$.mask, compositeSampler.$, uv)
-      .r;
-  };
-  const sampleFeatheredMask = (uv: d.v2f) => {
-    "use gpu";
-    const texel =
-      1 / d.vec2f(std.textureDimensions(compositeMaskLayout.$.mask));
-    const center = sampleMask(uv) * 4;
-    const cardinal =
-      (sampleMask(uv + d.vec2f(texel.x, 0)) +
-        sampleMask(uv - d.vec2f(texel.x, 0)) +
-        sampleMask(uv + d.vec2f(0, texel.y)) +
-        sampleMask(uv - d.vec2f(0, texel.y))) *
-      2;
-    const diagonal =
-      sampleMask(uv + texel) +
-      sampleMask(uv - texel) +
-      sampleMask(uv + d.vec2f(texel.x, -texel.y)) +
-      sampleMask(uv + d.vec2f(-texel.x, texel.y));
-    return (center + cardinal + diagonal) * 0.0625;
-  };
-
-  const compositeFragment = tgpu.fragmentFn({
-    in: { uv: d.vec2f },
-    out: d.vec4f,
-  })(({ uv }) => {
-    "use gpu";
-    const cropUv = d.vec2f(1 - uv.x, uv.y);
-    const sourcePixel =
-      compositeUniform.$.cropOrigin + cropUv * compositeUniform.$.cropSize;
-    const sourceUv = sourcePixel / d.vec2f(compositeUniform.$.sourceSize);
-    const cameraUv = compositeUniform.$.uvTransform * (sourceUv - 0.5) + 0.5;
-    const cameraColor = std.textureSampleBaseClampToEdge(
-      compositeFrameLayout.$.frame,
-      compositeSampler.$,
-      cameraUv,
-    );
-    const personMask = sampleFeatheredMask(uv);
-    const personAlpha = std.smoothstep(
-      PERSON_ALPHA_LOW,
-      PERSON_ALPHA_HIGH,
-      personMask,
-    );
-    const vertical = std.mix(
-      d.vec3f(0.09, 0.2, 0.62),
-      d.vec3f(0.96, 0.3, 0.45),
-      uv.y,
-    );
-    const gradient = std.mix(vertical, d.vec3f(1, 0.84, 0.38), uv.x * 0.35);
-    return d.vec4f(std.mix(gradient, cameraColor.rgb, personAlpha), 1);
-  });
-
-  const compositePipelineTgpu = root.createRenderPipeline({
-    vertex: common.fullScreenTriangle,
-    fragment: compositeFragment,
-    // IOSurface custom-track textures are imported as bgra8unorm (see
-    // WebGPUVideoTrack.create); the composite color target MUST match.
-    targets: { format: "bgra8unorm" as GPUTextureFormat },
-  });
-  const compositeMaskGroup = root.createBindGroup(compositeMaskLayout, {
-    mask: maskSampleView,
-  });
-
   // ---- RECORD every compute dispatch into raw natives. ----
   const preprocess = recordComputeDispatch(
     root,
@@ -399,15 +293,6 @@ export function buildSegmentationBundle(
     { frameLayout: upsampleFrameLayout },
   );
 
-  // ---- Flatten composite render bind groups by recording the render apply. ----
-  const composite = recordRenderDispatch(
-    root,
-    compositePipelineTgpu,
-    compositeMaskGroup,
-    compositeUniform,
-    /* frameLayout */ compositeFrameLayout,
-  );
-
   return {
     outputSize,
     maskView: root.unwrap(maskSampleView),
@@ -421,90 +306,5 @@ export function buildSegmentationBundle(
     preprocessParamsBuffer: root.unwrap(preprocessParamsTgpu),
     upsampleParamsBuffer: root.unwrap(upsampleParamsTgpu),
     postProcessParamsBuffer: root.unwrap(postProcessParamsTgpu),
-    compositePipeline: composite.pipeline,
-    compositeFrameLayout: root.unwrap(compositeFrameLayout),
-    compositeStaticGroups: composite.staticGroups,
-    compositeFrameGroupIndex: composite.frameGroupIndex,
-    compositeParamsBuffer: root.unwrap(compositeUniform.buffer),
-  };
-}
-
-interface RecordedRenderDispatch {
-  pipeline: GPURenderPipeline;
-  staticGroups: { index: number; bindGroup: GPUBindGroup }[];
-  frameGroupIndex: number;
-}
-
-function recordRenderDispatch(
-  root: TgpuRoot,
-  pipeline: TgpuRenderPipeline,
-  maskGroup: TgpuBindGroup,
-  // The composite uniform is bound via its own catch-all/uniform group; tgpu
-  // resolves it automatically, so we only supply the mask group explicitly. The
-  // uniform's group is recorded as a static group too.
-  _compositeUniform: TgpuUniform<typeof FrameCropParams>,
-  _frameLayout: TgpuBindGroupLayout,
-): RecordedRenderDispatch {
-  const captured: {
-    pipeline: GPURenderPipeline | null;
-    groups: { index: number; bindGroup: GPUBindGroup }[];
-  } = { pipeline: null, groups: [] };
-
-  // A proxy carrying `executeBundles` + `draw` is recognized by tgpu as a
-  // GPURenderPassEncoder, so `pipeline.with(proxy)` takes the external-render-
-  // encoder path: tgpu calls `_applyRenderState(proxy)` (recording setPipeline +
-  // each setBindGroup, including the auto-bound composite uniform "catch-all"
-  // group) and then `proxy.draw(...)`. No real attachment / beginRenderPass is
-  // needed. The per-frame external-texture group is intentionally NOT supplied,
-  // so it surfaces as the one missing group index.
-  const proxyRenderPass = {
-    executeBundles() {},
-    setPipeline(p: GPURenderPipeline) {
-      captured.pipeline = p;
-    },
-    setBindGroup(index: number, bindGroup: GPUBindGroup) {
-      captured.groups.push({ index, bindGroup });
-    },
-    setVertexBuffer() {},
-    setIndexBuffer() {},
-    setStencilReference() {},
-    draw() {},
-    pushDebugGroup() {},
-    popDebugGroup() {},
-    insertDebugMarker() {},
-  } as unknown as GPURenderPassEncoder;
-
-  // The external-texture group is intentionally absent, so tgpu records the
-  // pipeline + static groups (mask + the auto-bound composite-uniform catch-all)
-  // and then throws `MissingBindGroupsError`. That throw is expected here.
-  try {
-    pipeline.with(proxyRenderPass).with(maskGroup).draw(3);
-  } catch {
-    // expected: missing external-texture group (bound per-frame in the worklet)
-  }
-
-  if (!captured.pipeline) {
-    throw new Error("recordRenderDispatch: tgpu did not call setPipeline");
-  }
-  // Exactly one external-texture group is missing, so the total group count is
-  // recordedCount + 1; the frame group is the single uncovered index.
-  const used = new Set(captured.groups.map((g) => g.index));
-  const total = captured.groups.length + 1;
-  let frameGroupIndex = -1;
-  for (let index = 0; index < total; index++) {
-    if (!used.has(index)) {
-      frameGroupIndex = index;
-      break;
-    }
-  }
-  if (frameGroupIndex < 0) {
-    throw new Error(
-      "recordRenderDispatch: could not locate external-texture group",
-    );
-  }
-  return {
-    pipeline: captured.pipeline,
-    staticGroups: captured.groups,
-    frameGroupIndex,
   };
 }
