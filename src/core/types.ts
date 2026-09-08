@@ -16,10 +16,14 @@ export interface SegmentationContext {
 export interface GpuSegmentationInput {
   readonly kind: "gpu-texture";
   readonly timestampUs: number;
+  /** Dimensions of {@link texture}, in pixels. */
   readonly width: number;
   readonly height: number;
+  /**
+   * The upright RGBA frame the effect composites this frame — the same view passed as
+   * {@link VideoEffectFrame.source} — so the mask lines up with the output by construction.
+   */
   readonly texture: GPUTextureView;
-  readonly externalTexture?: GPUExternalTexture;
   readonly commandEncoder: GPUCommandEncoder;
 }
 
@@ -103,7 +107,6 @@ export interface VideoEffectFrame {
   readonly source: GPUTextureView;
   readonly output: GPUTextureView;
   readonly commandEncoder: GPUCommandEncoder;
-  readonly externalTexture?: GPUExternalTexture;
 }
 
 /**

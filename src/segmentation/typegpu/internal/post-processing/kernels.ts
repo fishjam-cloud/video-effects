@@ -84,7 +84,7 @@ export const upsampleParamsLayout = tgpu
 
 export const upsampleFrameLayout = tgpu
   .bindGroupLayout({
-    frame: { externalTexture: d.textureExternal() },
+    frame: { texture: d.texture2d(d.f32) },
   })
   .$idx(1);
 
@@ -184,10 +184,9 @@ const uncertaintyBand = (p: number) => {
 
 const cameraUvFromScreenUv = (uv: d.v2f) => {
   "use gpu";
-  const cropUv = d.vec2f(1 - uv.x, uv.y);
   const sourcePixel =
     upsampleParamsLayout.$.params.cropOrigin +
-    cropUv * upsampleParamsLayout.$.params.cropSize;
+    uv * upsampleParamsLayout.$.params.cropSize;
   const sourceUv =
     sourcePixel / d.vec2f(upsampleParamsLayout.$.params.sourceSize);
   return upsampleParamsLayout.$.params.uvTransform * (sourceUv - 0.5) + 0.5;
@@ -195,10 +194,11 @@ const cameraUvFromScreenUv = (uv: d.v2f) => {
 
 const cameraColorAtScreenUv = (uv: d.v2f) => {
   "use gpu";
-  return std.textureSampleBaseClampToEdge(
+  return std.textureSampleLevel(
     upsampleFrameLayout.$.frame,
     upsampleSamplerLayout.$.sampler,
     cameraUvFromScreenUv(uv),
+    0,
   ).rgb;
 };
 

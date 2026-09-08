@@ -35,9 +35,9 @@ import {
 import type { MaskBuffer as PostMaskBuffer } from "./post-processing/types";
 
 // ---------------------------------------------------------------------------
-// Video preprocess (model-space sampling of the camera external texture).
-// Ported from `inference/video-preprocess.ts` but with the layouts inlined here
-// so we can record the dispatch + expose the frame layout.
+// Video preprocess: samples the frame the effect composites (an upright RGBA
+// `texture_2d`) into model space. The frame layout is exposed so the per-frame
+// bind group can be built on the camera thread.
 // ---------------------------------------------------------------------------
 const MODEL_WIDTH = 256;
 const MODEL_HEIGHT = 256;
@@ -53,7 +53,7 @@ const videoFrameParamsLayout = tgpu
   .$idx(0);
 const videoFrameFrameLayout = tgpu
   .bindGroupLayout({
-    frame: { externalTexture: d.textureExternal() },
+    frame: { texture: d.texture2d(d.f32) },
   })
   .$idx(1);
 const videoFrameOutputLayout = tgpu
@@ -74,8 +74,7 @@ const videoPreprocessKernel = tgpu.computeFn({
   }
 
   const coord = d.vec2u(i & MODEL_COORD_MASK, i >>> MODEL_COORD_SHIFT);
-  const pixel = d.vec2f(coord) + 0.5;
-  const cropUv = d.vec2f(MODEL_SIZE.x - pixel.x, pixel.y) / MODEL_SIZE;
+  const cropUv = (d.vec2f(coord) + 0.5) / MODEL_SIZE;
   const sourceUv =
     (videoFrameParamsLayout.$.params.cropOrigin +
       cropUv * videoFrameParamsLayout.$.params.cropSize) /
@@ -83,10 +82,11 @@ const videoPreprocessKernel = tgpu.computeFn({
   const uv =
     videoFrameParamsLayout.$.params.uvTransform * (sourceUv - 0.5) + 0.5;
 
-  const color = std.textureSampleBaseClampToEdge(
+  const color = std.textureSampleLevel(
     videoFrameFrameLayout.$.frame,
     videoFrameOutputLayout.$.sampler,
     uv,
+    0,
   );
 
   videoFrameOutputLayout.$.dst[i] = d.vec4f(color.rgb, 0);
@@ -96,13 +96,14 @@ const videoPreprocessKernel = tgpu.computeFn({
 // The fully-flattened, worklet-serializable result of setup.
 // ---------------------------------------------------------------------------
 export interface SegmentationBundle {
-  /** Square edge length of the IOSurface output (composite target). */
-  readonly outputSize: number;
+  /** Size of the mask texture: the composite target's size, so the mask is per output pixel. */
+  readonly outputWidth: number;
+  readonly outputHeight: number;
   /** The upsampled person-confidence mask consumed by the effects compositor. */
   readonly maskView: GPUTextureView;
 
   // ---- Per-frame compute dispatches, in execution order. ----
-  /** Model-space camera sampling. Has an external-texture frame group. */
+  /** Model-space frame sampling. Has a frame-texture group. */
   readonly preprocess: RecordedComputeDispatch;
   /** The CNN op chain (conv/dwconv/pool/resize/add/mul/head). All static. */
   readonly cnn: RecordedComputeDispatch[];
@@ -110,13 +111,13 @@ export interface SegmentationBundle {
   readonly temporal: RecordedComputeDispatch;
   /** Person-core prior. Static. */
   readonly prior: RecordedComputeDispatch;
-  /** Bilateral edge-aware upsample. Has an external-texture frame group. */
+  /** Bilateral edge-aware upsample. Has a frame-texture group. */
   readonly upsample: RecordedComputeDispatch;
 
   // ---- Raw natives the worklet needs for the per-frame work. ----
-  /** Bind-group layout for the preprocess external-texture group. */
+  /** Bind-group layout for the preprocess frame-texture group. */
   readonly preprocessFrameLayout: GPUBindGroupLayout;
-  /** Bind-group layout for the upsample external-texture group. */
+  /** Bind-group layout for the upsample frame-texture group. */
   readonly upsampleFrameLayout: GPUBindGroupLayout;
   /** Uniform buffer for FrameCropParams consumed by the preprocess kernel. */
   readonly preprocessParamsBuffer: GPUBuffer;
@@ -133,7 +134,8 @@ export interface SegmentationBundle {
 export function buildSegmentationBundle(
   root: TgpuRoot,
   plan: SegmenterPlan,
-  outputSize: number,
+  outputWidth: number,
+  outputHeight: number,
 ): SegmentationBundle {
   // ---- CNN buffers + weights (from `segmenter.ts`). ----
   const cnnMask = root
@@ -223,10 +225,10 @@ export function buildSegmentationBundle(
     dst: priorMask,
   });
 
-  // Mask output texture (rgba16float storage+sampled), sized to the output.
+  // Mask output texture (rgba16float storage+sampled), one texel per output pixel.
   const maskTexture = root
     .createTexture({
-      size: [outputSize, outputSize],
+      size: [outputWidth, outputHeight],
       format: "rgba16float" as const,
     })
     .$usage("storage", "sampled");
@@ -248,8 +250,8 @@ export function buildSegmentationBundle(
     src: priorMask,
     output: maskStorageView,
   });
-  const upsampleWorkgroupsX = Math.ceil(outputSize / UPSAMPLE_WORKGROUP_SIZE);
-  const upsampleWorkgroupsY = Math.ceil(outputSize / UPSAMPLE_WORKGROUP_SIZE);
+  const upsampleWorkgroupsX = Math.ceil(outputWidth / UPSAMPLE_WORKGROUP_SIZE);
+  const upsampleWorkgroupsY = Math.ceil(outputHeight / UPSAMPLE_WORKGROUP_SIZE);
 
   // ---- RECORD every compute dispatch into raw natives. ----
   const preprocess = recordComputeDispatch(
@@ -294,7 +296,8 @@ export function buildSegmentationBundle(
   );
 
   return {
-    outputSize,
+    outputWidth,
+    outputHeight,
     maskView: root.unwrap(maskSampleView),
     preprocess,
     cnn,

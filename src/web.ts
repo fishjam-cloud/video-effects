@@ -238,7 +238,6 @@ class WebTrackRenderer {
       source: this.source,
       output,
       commandEncoder: encoder,
-      externalTexture,
     });
     this.device.queue.submit([encoder.finish()]);
     this.publishTrack.requestFrame();

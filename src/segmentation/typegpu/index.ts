@@ -12,7 +12,7 @@ import type {
   SegmentationInput,
 } from "../../core/types";
 import {
-  computeSquareCrop,
+  computeFullFrameCrop,
   type FrameCrop,
   packFrameCropParams,
   packUpsampleParams,
@@ -71,7 +71,8 @@ async function createTypeGpuSession(
   const bundle = buildSegmentationBundle(
     root,
     plan,
-    Math.max(context.outputWidth, context.outputHeight),
+    context.outputWidth,
+    context.outputHeight,
   );
   const state: TypeGpuState = {
     providerId: PROVIDER_ID,
@@ -126,7 +127,7 @@ function dispatch(
 function encodeMask(
   bundle: SegmentationBundle,
   device: GPUDevice,
-  frame: GPUExternalTexture,
+  frame: GPUTextureView,
   encoder: GPUCommandEncoder,
 ): void {
   "worklet";
@@ -153,9 +154,9 @@ function offerFrame(
 ): void {
   "worklet";
   const state = kernelState as TypeGpuState;
-  if (input.kind !== "gpu-texture" || input.externalTexture == null) return;
+  if (input.kind !== "gpu-texture") return;
   if (input.timestampUs < state.timestampUs) return;
-  const crop = computeSquareCrop(input.width, input.height, 1, 0, 0, 1);
+  const crop = computeFullFrameCrop(input.width, input.height);
   state.crop = crop;
   const device = state.device;
   device.queue.writeBuffer(
@@ -173,15 +174,14 @@ function offerFrame(
     0,
     new Uint32Array([state.initialized ? 1 : 0]),
   );
-  encodeMask(state.bundle, device, input.externalTexture, input.commandEncoder);
+  encodeMask(state.bundle, device, input.texture, input.commandEncoder);
   state.initialized = true;
   state.timestampUs = input.timestampUs;
 }
 
 /**
- * Maps a full-frame source UV to the mask texture's UV. The mask covers only the square centre
- * crop the model looked at, and the model saw that crop mirrored (see `videoPreprocessKernel`
- * and `cameraUvFromScreenUv`), so mask u runs opposite to source u.
+ * Maps a source UV to the mask texture's UV: the inverse of the crop the model looked at
+ * (`videoPreprocessKernel` samples `cropOrigin + uv * cropSize` of the source).
  */
 function maskTransformFor(crop: FrameCrop): Float32Array {
   "worklet";
@@ -189,7 +189,7 @@ function maskTransformFor(crop: FrameCrop): Float32Array {
   const scaleY = crop.sourceHeight / crop.cropSizeY;
   const offsetX = -crop.cropOriginX / crop.cropSizeX;
   const offsetY = -crop.cropOriginY / crop.cropSizeY;
-  return new Float32Array([-scaleX, 0, 1 - offsetX, 0, scaleY, offsetY]);
+  return new Float32Array([scaleX, 0, offsetX, 0, scaleY, offsetY]);
 }
 
 function latestMask(

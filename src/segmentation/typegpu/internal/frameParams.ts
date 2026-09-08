@@ -83,29 +83,27 @@ export function packUpsampleParams(
 }
 
 /**
- * Square center-crop of a (sourceWidth x sourceHeight) frame, plus the chosen
- * orientation transform — worklet port of the example's `squareCrop`.
+ * The whole (sourceWidth x sourceHeight) frame as the model's crop, with the identity
+ * orientation transform. The model resamples it to its square input without preserving the
+ * aspect ratio, as MediaPipe's own selfie-segmentation graph does, so every output pixel has a
+ * mask value: a centre square crop would leave the top and bottom of a portrait frame
+ * unsegmented.
  */
-export function computeSquareCrop(
+export function computeFullFrameCrop(
   sourceWidth: number,
   sourceHeight: number,
-  uv00: number,
-  uv01: number,
-  uv10: number,
-  uv11: number,
 ): FrameCrop {
   "worklet";
-  const size = Math.min(sourceWidth, sourceHeight);
   return {
     sourceWidth,
     sourceHeight,
-    cropOriginX: Math.floor((sourceWidth - size) / 2),
-    cropOriginY: Math.floor((sourceHeight - size) / 2),
-    cropSizeX: size,
-    cropSizeY: size,
-    uv00,
-    uv01,
-    uv10,
-    uv11,
+    cropOriginX: 0,
+    cropOriginY: 0,
+    cropSizeX: sourceWidth,
+    cropSizeY: sourceHeight,
+    uv00: 1,
+    uv01: 0,
+    uv10: 0,
+    uv11: 1,
   };
 }
