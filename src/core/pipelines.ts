@@ -74,7 +74,11 @@ struct CompositeParams {
     dot(params.maskRow0.xyz, vec3f(input.uv, 1.0)),
     dot(params.maskRow1.xyz, vec3f(input.uv, 1.0)),
   );
-  let confidence = textureSample(maskTexture, maskSampler, maskUv).r;
+  // The mask only covers the square the model looked at. Outside it, sampling would clamp the
+  // mask's edge and smear the border foreground across the whole strip, so treat those pixels
+  // as background (they get blurred) instead.
+  let insideMask = all(maskUv >= vec2f(0.0)) && all(maskUv <= vec2f(1.0));
+  let confidence = select(0.0, textureSample(maskTexture, maskSampler, maskUv).r, insideMask);
   let edgeFeather = params.settings.x;
   let alpha = smoothstep(0.5 - edgeFeather, 0.5 + edgeFeather, confidence);
   return mix(textureSample(backgroundTexture, backgroundSampler, input.uv), textureSample(sourceTexture, sourceSampler, input.uv), alpha);
@@ -107,7 +111,9 @@ struct ImageParams {
   let imageUv = input.uv * params.imageScale + params.imageOffset;
   let insideImage = all(imageUv >= vec2f(0.0)) && all(imageUv <= vec2f(1.0));
   let imageColor = select(params.backgroundColor, textureSample(imageTexture, imageSampler, imageUv), insideImage || params.contains < 0.5);
-  let confidence = textureSample(maskTexture, maskSampler, maskUv).r;
+  // Outside the model's square, treat as background so the mask edge is not smeared across the strip.
+  let insideMask = all(maskUv >= vec2f(0.0)) && all(maskUv <= vec2f(1.0));
+  let confidence = select(0.0, textureSample(maskTexture, maskSampler, maskUv).r, insideMask);
   let alpha = smoothstep(0.5 - params.edgeFeather, 0.5 + params.edgeFeather, confidence);
   return mix(imageColor, textureSample(sourceTexture, sourceSampler, input.uv), alpha);
 }
