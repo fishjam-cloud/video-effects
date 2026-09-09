@@ -34,6 +34,34 @@ const effect = useBackgroundImage({
 });
 ```
 
+## Fishjam React Native camera
+
+`@fishjam-cloud/video-effects/fishjam-react-native` runs an effect on the camera track Fishjam already publishes. Hand it the raw camera track from `useCamera`'s `setCameraTrackMiddleware`, draw each frame in a worklet, and return `session.track` from the middleware. No separate camera or custom track is needed.
+
+```tsx
+import { useCamera } from "@fishjam-cloud/react-native-client";
+import {
+  createCameraFrameProcessorSession,
+  useCameraWebGpuDevice,
+} from "@fishjam-cloud/video-effects/fishjam-react-native";
+
+const { device } = useCameraWebGpuDevice();
+const { setCameraTrackMiddleware } = useCamera();
+
+setCameraTrackMiddleware(async (rawTrack) => {
+  const session = await createCameraFrameProcessorSession({
+    track: rawTrack,
+    device,
+    width: 720,
+    height: 1280,
+    frameKernel,
+  });
+  return { track: session.track, onClear: () => void session.dispose() };
+});
+```
+
+The app must have these installed and linked: `@fishjam-cloud/react-native-webrtc` (0.30.2 or newer), `react-native-webgpu`, `react-native-worklets` and `@fishjam-cloud/react-native-webrtc-worklets`.
+
 ## Entry points
 
 - `@fishjam-cloud/video-effects` — provider and effect contracts
@@ -42,5 +70,6 @@ const effect = useBackgroundImage({
 - `@fishjam-cloud/video-effects/segmentation/typegpu` — experimental GPU-only segmentation provider
 - `@fishjam-cloud/video-effects/web` — browser track middleware
 - `@fishjam-cloud/video-effects/fishjam-react` — Fishjam React adapter
+- `@fishjam-cloud/video-effects/fishjam-react-native` — Fishjam React Native camera-track session
 
 Effects improve presentation; they are not privacy or security boundaries.
