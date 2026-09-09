@@ -62,7 +62,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fishjam-cloud/fishjam-video-effects.git"
+    "url": "git+https://github.com/fishjam-cloud/video-effects.git"
   },
   "scripts": {
     "build": "bob build",
@@ -146,5 +146,7 @@
   "engines": {
     "node": ">=20"
   },
-  "packageManager": "yarn@4.16.0"
+  "packageManager": "yarn@4.16.0",
+  "homepage": "https://github.com/fishjam-cloud/video-effects#readme",
+  "bugs": "https://github.com/fishjam-cloud/video-effects/issues"
 }
