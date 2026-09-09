@@ -8,6 +8,10 @@ import type {
   VideoEffectStatus,
 } from "./core/types";
 
+// The resolve pass renders the camera into this texture, so its pipeline must target this format,
+// not the canvas format (BGRA on macOS), or every frame is rejected and the track stays black.
+const SOURCE_TEXTURE_FORMAT: GPUTextureFormat = "rgba8unorm";
+
 export type VideoTrackMiddleware = (track: MediaStreamTrack) => Promise<{
   track: MediaStreamTrack;
   onClear: () => void;
@@ -146,7 +150,7 @@ class WebTrackRenderer {
     const sourceTexture = device.createTexture({
       label: "fishjam-web-effect-source",
       size: [canvas.width, canvas.height],
-      format: "rgba8unorm",
+      format: SOURCE_TEXTURE_FORMAT,
       usage:
         GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
     });
@@ -157,7 +161,7 @@ class WebTrackRenderer {
       device,
       effect,
       publishTrack,
-      createExternalResolvePipeline(device, format),
+      createExternalResolvePipeline(device, SOURCE_TEXTURE_FORMAT),
       sourceTexture,
     );
     try {
@@ -168,7 +172,6 @@ class WebTrackRenderer {
         outputFormat: format,
         onStatus,
       });
-      onStatus("ready");
       renderer.scheduleNextFrame();
       return renderer;
     } catch (cause) {
@@ -222,7 +225,16 @@ class WebTrackRenderer {
     pass.setBindGroup(0, resolveGroup);
     pass.draw(3);
     pass.end();
-    if (this.effect.segmentationInput === "web-frame") {
+    if (this.effect.segmentationInput === "gpu-texture") {
+      this.session.offer({
+        kind: "gpu-texture",
+        timestampUs,
+        width: this.canvas.width,
+        height: this.canvas.height,
+        texture: this.source,
+        commandEncoder: encoder,
+      });
+    } else if (this.effect.segmentationInput === "web-frame") {
       void createImageBitmap(this.video).then((frame) =>
         this.session?.offer({
           kind: "web-frame",

@@ -24,7 +24,7 @@ import {
 } from "./internal/segmentationPipeline";
 
 const DEFAULT_MODEL_URL = new URL(
-  "../../../assets/selfie_segmenter.ssgbin",
+  "../../../../assets/selfie_segmenter.ssgbin",
   import.meta.url,
 ).toString();
 

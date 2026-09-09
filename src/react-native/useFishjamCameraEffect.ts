@@ -133,7 +133,6 @@ export function useFishjamCameraEffect(
           return;
         }
         setSession(newSession);
-        setStatus("ready");
       })
       .catch((cause: unknown) => {
         if (!active) return;
