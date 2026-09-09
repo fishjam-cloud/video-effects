@@ -20,6 +20,14 @@ export function createBackgroundBlurEffect(
       return getOptions().segmentation.input;
     },
     create: (context) => createBackgroundBlurSession(context, getOptions),
+    frameOptions: () => {
+      const options = getOptions();
+      return {
+        enabled: options.enabled,
+        edgeFeather: options.edgeFeather,
+        radius: options.radius,
+      };
+    },
   };
 }
 
@@ -33,5 +41,14 @@ export function createBackgroundImageEffect(
       return getOptions().segmentation.input;
     },
     create: (context) => createBackgroundImageSession(context, getOptions),
+    frameOptions: () => {
+      const options = getOptions();
+      return {
+        enabled: options.enabled,
+        edgeFeather: options.edgeFeather,
+        fit: options.fit,
+        backgroundColor: options.backgroundColor,
+      };
+    },
   };
 }

@@ -1344,6 +1344,19 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@fishjam-cloud/react-client@npm:0.30.0":
+  version: 0.30.0
+  resolution: "@fishjam-cloud/react-client@npm:0.30.0"
+  dependencies:
+    "@fishjam-cloud/ts-client": "npm:0.30.0"
+    events: "npm:3.3.0"
+    lodash.isequal: "npm:4.5.0"
+  peerDependencies:
+    react: ^19.1.0
+  checksum: 10c0/5c3bbfc5fca1f965c638e62dac26858a57caad277d3fca0a32c74a7c577e5359d4c05d71edc94ec450eb14ac0d7d64f2ae40b7a3e5484575e6ea8476bbc2c1ae
+  languageName: node
+  linkType: hard
+
 "@fishjam-cloud/react-client@npm:^0.29.0":
   version: 0.29.0
   resolution: "@fishjam-cloud/react-client@npm:0.29.0"
@@ -1354,6 +1367,37 @@ __metadata:
   peerDependencies:
     react: ^19.1.0
   checksum: 10c0/d89ada09763b68a2c135d26e34146802a87187af8b28fcf83a543745662788aeb809230d85a2faa3a024761bd4607cbad2b92a2e69debb545531231110c9dcdb
+  languageName: node
+  linkType: hard
+
+"@fishjam-cloud/react-native-client@npm:^0.30.0":
+  version: 0.30.0
+  resolution: "@fishjam-cloud/react-native-client@npm:0.30.0"
+  dependencies:
+    "@fishjam-cloud/react-client": "npm:0.30.0"
+    "@fishjam-cloud/react-native-webrtc": "npm:0.30.0"
+    fast-text-encoding: "npm:1.0.6"
+    react-native-get-random-values: "npm:1.11.0"
+    react-native-url-polyfill: "npm:3.0.0"
+  peerDependencies:
+    "@fishjam-cloud/react-native-webrtc": 0.30.0
+    expo: "*"
+    react: "*"
+    react-native: "*"
+    react-native-get-random-values: 1.11.0
+  checksum: 10c0/b98e63697b07758577f8b9be880e5fdbfe6b5fb2274584bc9c33105ff9d2e9af6ac637c17932d61e5e02880be68ef21090091cca08feef710c6da0d027776a67
+  languageName: node
+  linkType: hard
+
+"@fishjam-cloud/react-native-webrtc@npm:0.30.0":
+  version: 0.30.0
+  resolution: "@fishjam-cloud/react-native-webrtc@npm:0.30.0"
+  dependencies:
+    base64-js: "npm:1.5.1"
+    debug: "npm:4.3.4"
+  peerDependencies:
+    react-native: "*"
+  checksum: 10c0/fc79b5c4e8e6b7221fccdca0888962e26a033b43493c937e9333bde5cdc7d7f9c47793cfdec48ccfd05ddcbacdbf89ed2b6902d5c251c12bb7e94aec98763b65
   languageName: node
   linkType: hard
 
@@ -1382,6 +1426,19 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@fishjam-cloud/ts-client@npm:0.30.0":
+  version: 0.30.0
+  resolution: "@fishjam-cloud/ts-client@npm:0.30.0"
+  dependencies:
+    "@binbat/whip-whep": "npm:^1.1.1-sdp-trickle-throw"
+    "@bufbuild/protobuf": "npm:^2.2.3"
+    events: "npm:^3.3.0"
+    typed-emitter: "npm:^2.1.0"
+    uuid: "npm:^11.1.0"
+  checksum: 10c0/651d21cad75455334ee29c6fe6b503d134985c328efdda85f59333568b3a85071e4ead4779bc5e66f35703097160aab03842fbfa1430ca56d893bed7e2366a09
+  languageName: node
+  linkType: hard
+
 "@fishjam-cloud/video-effects@workspace:.":
   version: 0.0.0-use.local
   resolution: "@fishjam-cloud/video-effects@workspace:."
@@ -1389,6 +1446,7 @@ __metadata:
     "@babel/core": "npm:^7.29.0"
     "@babel/preset-typescript": "npm:^7.27.0"
     "@fishjam-cloud/react-client": "npm:^0.29.0"
+    "@fishjam-cloud/react-native-client": "npm:^0.30.0"
     "@fishjam-cloud/react-native-webrtc": "npm:0.30.2"
     "@types/react": "npm:19.2.14"
     "@typescript-eslint/eslint-plugin": "npm:^8.29.1"
@@ -1410,6 +1468,7 @@ __metadata:
     unplugin-typegpu: "npm:^0.12.0"
   peerDependencies:
     "@fishjam-cloud/react-client": "*"
+    "@fishjam-cloud/react-native-client": "*"
     "@fishjam-cloud/react-native-webrtc": ">=0.30.2"
     react: ">=18"
     react-native: "*"
@@ -1417,6 +1476,8 @@ __metadata:
     react-native-worklets: ">=0.12.1"
   peerDependenciesMeta:
     "@fishjam-cloud/react-client":
+      optional: true
+    "@fishjam-cloud/react-native-client":
       optional: true
     "@fishjam-cloud/react-native-webrtc":
       optional: true
@@ -2213,7 +2274,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"base64-js@npm:1.5.1, base64-js@npm:^1.5.1":
+"base64-js@npm:1.5.1, base64-js@npm:^1.3.1, base64-js@npm:^1.5.1":
   version: 1.5.1
   resolution: "base64-js@npm:1.5.1"
   checksum: 10c0/f23823513b63173a001030fae4f2dabe283b99a9d324ade3ad3d148e218134676f1ee8568c877cd79ec1c53158dcf2d2ba527a97c606618928ba99dd930102bf
@@ -2294,6 +2355,16 @@ __metadata:
   version: 1.1.2
   resolution: "buffer-from@npm:1.1.2"
   checksum: 10c0/124fff9d66d691a86d3b062eff4663fe437a9d9ee4b47b1b9e97f5a5d14f6d5399345db80f796827be7c95e70a8e765dd404b7c3ff3b3324f98e9b0c8826cc34
+  languageName: node
+  linkType: hard
+
+"buffer@npm:^5.4.3":
+  version: 5.7.1
+  resolution: "buffer@npm:5.7.1"
+  dependencies:
+    base64-js: "npm:^1.3.1"
+    ieee754: "npm:^1.1.13"
+  checksum: 10c0/27cac81cff434ed2876058d72e7c4789d11ff1120ef32c9de48f59eab58179b66710c488987d295ae89a228f835fc66d088652dffeb8e3ba8659f80eb091d55e
   languageName: node
   linkType: hard
 
@@ -3164,6 +3235,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"fast-base64-decode@npm:^1.0.0":
+  version: 1.0.0
+  resolution: "fast-base64-decode@npm:1.0.0"
+  checksum: 10c0/6d8feab513222a463d1cb58d24e04d2e04b0791ac6559861f99543daaa590e2636d040d611b40a50799bfb5c5304265d05e3658b5adf6b841a50ef6bf833d821
+  languageName: node
+  linkType: hard
+
 "fast-deep-equal@npm:^3.1.1, fast-deep-equal@npm:^3.1.3":
   version: 3.1.3
   resolution: "fast-deep-equal@npm:3.1.3"
@@ -3195,6 +3273,13 @@ __metadata:
   version: 2.0.6
   resolution: "fast-levenshtein@npm:2.0.6"
   checksum: 10c0/111972b37338bcb88f7d9e2c5907862c280ebf4234433b95bc611e518d192ccb2d38119c4ac86e26b668d75f7f3894f4ff5c4982899afced7ca78633b08287c4
+  languageName: node
+  linkType: hard
+
+"fast-text-encoding@npm:1.0.6":
+  version: 1.0.6
+  resolution: "fast-text-encoding@npm:1.0.6"
+  checksum: 10c0/e1d0381bda229c92c7906f63308f3b9caca8c78b732768b1ee16f560089ed21bc159bbe1434138ccd3815931ec8d4785bdade1ad1c45accfdf27ac6606ac67d2
   languageName: node
   linkType: hard
 
@@ -3664,6 +3749,13 @@ __metadata:
   version: 1.1.1
   resolution: "human-signals@npm:1.1.1"
   checksum: 10c0/18810ed239a7a5e23fb6c32d0fd4be75d7cd337a07ad59b8dbf0794cb0761e6e628349ee04c409e605fe55344716eab5d0a47a62ba2a2d0d367c89a2b4247b1e
+  languageName: node
+  linkType: hard
+
+"ieee754@npm:^1.1.13":
+  version: 1.2.1
+  resolution: "ieee754@npm:1.2.1"
+  checksum: 10c0/b0782ef5e0935b9f12883a2e2aa37baa75da6e66ce6515c168697b42160807d9330de9a32ec1ed73149aea02e0d822e572bca6f1e22bdcbd2149e13b050b17bb
   languageName: node
   linkType: hard
 
@@ -5150,7 +5242,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"punycode@npm:^2.1.0":
+"punycode@npm:^2.1.0, punycode@npm:^2.1.1":
   version: 2.3.1
   resolution: "punycode@npm:2.3.1"
   checksum: 10c0/14f76a8206bc3464f794fb2e3d3cc665ae416c01893ad7a02b23766eb07159144ee612ad67af5e84fa4479ccfe67678c4feb126b0485651b302babf66f04f9e9
@@ -5218,6 +5310,28 @@ __metadata:
   bin:
     bob: bin/bob
   checksum: 10c0/a983284f71d1c06000e422287bffd3ba4f1d547c26681253cef42b1074cfd37b2b9ff8305cf3a1c7c3ee605fa959052ae430332151a5a97c7675fe6ef8f4cb63
+  languageName: node
+  linkType: hard
+
+"react-native-get-random-values@npm:1.11.0":
+  version: 1.11.0
+  resolution: "react-native-get-random-values@npm:1.11.0"
+  dependencies:
+    fast-base64-decode: "npm:^1.0.0"
+  peerDependencies:
+    react-native: ">=0.56"
+  checksum: 10c0/2ce71f1ab7f5b36d4a9dd59cc80b4aa75526f047c6680a7f1a388fa8b9a62efdacaf7b7de3be593c73e882773b2eee74916b00f7c8b158e40b46388998218586
+  languageName: node
+  linkType: hard
+
+"react-native-url-polyfill@npm:3.0.0":
+  version: 3.0.0
+  resolution: "react-native-url-polyfill@npm:3.0.0"
+  dependencies:
+    whatwg-url-without-unicode: "npm:8.0.0-3"
+  peerDependencies:
+    react-native: "*"
+  checksum: 10c0/a1e539c2a28dc48125ada8bf29f3536ee2c149e4a5e3d205858755783afafe7f871ce1de8b66cb1c4cc05e15e212c74c49e93ddde856cda63fcf660cf943522a
   languageName: node
   linkType: hard
 
@@ -6329,6 +6443,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"webidl-conversions@npm:^5.0.0":
+  version: 5.0.0
+  resolution: "webidl-conversions@npm:5.0.0"
+  checksum: 10c0/bf31df332ed11e1114bfcae7712d9ab2c37e7faa60ba32d8fdbee785937c0b012eee235c19d2b5d84f5072db84a160e8d08dd382da7f850feec26a4f46add8ff
+  languageName: node
+  linkType: hard
+
 "webpack-virtual-modules@npm:^0.6.2":
   version: 0.6.2
   resolution: "webpack-virtual-modules@npm:0.6.2"
@@ -6340,6 +6461,17 @@ __metadata:
   version: 3.6.20
   resolution: "whatwg-fetch@npm:3.6.20"
   checksum: 10c0/fa972dd14091321d38f36a4d062298df58c2248393ef9e8b154493c347c62e2756e25be29c16277396046d6eaa4b11bd174f34e6403fff6aaca9fb30fa1ff46d
+  languageName: node
+  linkType: hard
+
+"whatwg-url-without-unicode@npm:8.0.0-3":
+  version: 8.0.0-3
+  resolution: "whatwg-url-without-unicode@npm:8.0.0-3"
+  dependencies:
+    buffer: "npm:^5.4.3"
+    punycode: "npm:^2.1.1"
+    webidl-conversions: "npm:^5.0.0"
+  checksum: 10c0/c27a637ab7d01981b2e2f576fde2113b9c42247500e093d2f5ba94b515d5c86dbcf70e5cad4b21b8813185f21fa1b4846f53c79fa87995293457e28c889cc0fd
   languageName: node
   linkType: hard
 

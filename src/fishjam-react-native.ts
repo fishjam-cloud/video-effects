@@ -11,6 +11,11 @@
  */
 
 export {
+  type FishjamCameraEffectOptions,
+  type FishjamCameraEffectResult,
+  useFishjamCameraEffect,
+} from "./react-native/useFishjamCameraEffect";
+export {
   type CameraFrameInfo,
   type CameraFrameKernel,
   type CameraFrameProcessorSession,

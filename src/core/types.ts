@@ -143,6 +143,11 @@ export interface VideoEffectSession<FrameOptions = unknown> {
 export interface VideoEffect<FrameOptions = unknown> {
   readonly id: string;
   readonly segmentationInput: SegmentationInputKind;
+  /**
+   * The effect's live per-frame options, for callers that drive
+   * {@link VideoEffectSession.frameKernel} on another runtime.
+   */
+  readonly frameOptions?: () => FrameOptions;
   create(
     context: VideoEffectContext,
   ): Promise<VideoEffectSession<FrameOptions>>;
