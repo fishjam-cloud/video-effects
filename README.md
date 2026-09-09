@@ -60,7 +60,7 @@ setCameraTrackMiddleware(async (rawTrack) => {
 });
 ```
 
-The app must have these installed and linked: `@fishjam-cloud/react-native-webrtc` (0.30.2 or newer), `react-native-webgpu`, `react-native-worklets` and `@fishjam-cloud/react-native-webrtc-worklets`.
+The app must have these installed and linked: `@fishjam-cloud/react-native-webrtc` (0.30.2 or newer), `react-native-webgpu`, `react-native-worklets` and `@fishjam-cloud/react-native-worklets`.
 
 ## Entry points
 

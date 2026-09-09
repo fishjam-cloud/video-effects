@@ -109,10 +109,10 @@ interface CameraFrameConsumerModule {
 function loadCameraFrameConsumerModule(): CameraFrameConsumerModule {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require("@fishjam-cloud/react-native-webrtc-worklets") as CameraFrameConsumerModule;
+    return require("@fishjam-cloud/react-native-worklets") as CameraFrameConsumerModule;
   } catch (cause) {
     const error = new Error(
-      "createCameraFrameProcessorSession needs @fishjam-cloud/react-native-webrtc-worklets. Install it and rebuild the native app.",
+      "createCameraFrameProcessorSession needs @fishjam-cloud/react-native-worklets. Install it and rebuild the native app.",
     );
     (error as { cause?: unknown }).cause = cause;
     throw error;

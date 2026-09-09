@@ -5,7 +5,7 @@
  * kernel on the GPU and republishes the result as the peer's camera track.
  *
  * Requires `@fishjam-cloud/react-native-webrtc`, `react-native-webgpu`, `react-native-worklets` and
- * `@fishjam-cloud/react-native-webrtc-worklets` in the app.
+ * `@fishjam-cloud/react-native-worklets` in the app.
  *
  * @packageDocumentation
  */
