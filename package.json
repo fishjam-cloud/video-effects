@@ -50,6 +50,7 @@
       "import": "./dist/module/fishjam-react-native.js",
       "default": "./dist/module/fishjam-react-native.js"
     },
+    "./assets/*": "./assets/*",
     "./package.json": "./package.json"
   },
   "files": [
