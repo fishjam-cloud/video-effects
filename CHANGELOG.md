@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Background blur: the person no longer bleeds into the blurred background (no halo), the outline is a smooth ramp that hugs the body, and similar-coloured background next to the person is no longer left sharp.
+
 ## 0.1.1
 
 - Web: the camera effect renders again (the resolve pass targeted the canvas format), feeds the segmentation its GPU texture so background blur applies, and the packaged default model path resolves.

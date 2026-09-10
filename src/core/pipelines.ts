@@ -55,33 +55,97 @@ const UPSAMPLE_FRAGMENT = /* wgsl */ `
 }
 `;
 
-const MASK_COMPOSITE_FRAGMENT = /* wgsl */ `
+// Shared by every shader that reads the person mask. `erode` shrinks the person area by that
+// many mask texels (as uv) so the sharp region hugs the body instead of spilling around it, and
+// `threshold`/`feather` turn the eroded confidence into a soft blend weight. Outside the square the
+// model looked at the mask would clamp to its edge and smear the border across the strip, so those
+// pixels count as background.
+const PERSON_ALPHA_FUNCTION = /* wgsl */ `
+fn erodedMask(maskUv: vec2f, erode: vec2f) -> f32 {
+  var confidence = textureSample(maskTexture, maskSampler, maskUv).r;
+  confidence = min(confidence, textureSample(maskTexture, maskSampler, maskUv + vec2f(erode.x, 0.0)).r);
+  confidence = min(confidence, textureSample(maskTexture, maskSampler, maskUv - vec2f(erode.x, 0.0)).r);
+  confidence = min(confidence, textureSample(maskTexture, maskSampler, maskUv + vec2f(0.0, erode.y)).r);
+  confidence = min(confidence, textureSample(maskTexture, maskSampler, maskUv - vec2f(0.0, erode.y)).r);
+  return confidence;
+}
+fn personAlpha(maskUv: vec2f, feather: f32, erode: vec2f, threshold: f32) -> f32 {
+  let insideMask = all(maskUv >= vec2f(0.0)) && all(maskUv <= vec2f(1.0));
+  // The eroded mask keeps the coarse steps of the model output; averaging it over a small
+  // diamond turns those steps into a smooth ramp before the feather is applied.
+  let smoothing = erode * 0.75;
+  var confidence = erodedMask(maskUv, erode) * 2.0;
+  confidence += erodedMask(maskUv + vec2f(smoothing.x, smoothing.y), erode);
+  confidence += erodedMask(maskUv + vec2f(-smoothing.x, smoothing.y), erode);
+  confidence += erodedMask(maskUv + vec2f(smoothing.x, -smoothing.y), erode);
+  confidence += erodedMask(maskUv + vec2f(-smoothing.x, -smoothing.y), erode);
+  let alpha = smoothstep(threshold - feather, threshold + feather, confidence / 6.0);
+  return select(0.0, alpha, insideMask);
+}
+`;
+
 // 48 bytes, matching the JS-side buffer: a trailing vec3f would pad the struct to 64.
+// settings = (edge feather, erode u, erode v, threshold).
+const COMPOSITE_PARAMS_STRUCT = /* wgsl */ `
 struct CompositeParams {
   maskRow0: vec4f,
   maskRow1: vec4f,
   settings: vec4f,
 };
+`;
+
+// Turns the person mask into the blend weight once per frame, at half resolution: the erosion
+// and smoothing taps run here and nowhere else. Consumers read the result with a single tap.
+const PERSON_ALPHA_FRAGMENT = /* wgsl */ `
+${COMPOSITE_PARAMS_STRUCT}
+@group(0) @binding(0) var maskTexture: texture_2d<f32>;
+@group(0) @binding(1) var maskSampler: sampler;
+@group(1) @binding(0) var<uniform> params: CompositeParams;
+${PERSON_ALPHA_FUNCTION}
+@fragment fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
+  let maskUv = vec2f(dot(params.maskRow0.xyz, vec3f(input.uv, 1.0)), dot(params.maskRow1.xyz, vec3f(input.uv, 1.0)));
+  return vec4f(personAlpha(maskUv, params.settings.x, params.settings.yz, params.settings.w), 0.0, 0.0, 1.0);
+}
+`;
+
+// First rung of the blur ladder: the same five-tap downsample, but every tap is weighted by how
+// much background it holds and the weight travels in alpha. Blurring only the background keeps
+// the person's colours from bleeding into it, which is what shows as a halo around the outline.
+const MASKED_DOWNSAMPLE_FRAGMENT = /* wgsl */ `
+@group(0) @binding(0) var sourceTexture: texture_2d<f32>;
+@group(0) @binding(1) var sourceSampler: sampler;
+@group(1) @binding(0) var alphaTexture: texture_2d<f32>;
+@group(1) @binding(1) var alphaSampler: sampler;
+fn backgroundTap(uv: vec2f) -> vec4f {
+  let weight = 1.0 - textureSample(alphaTexture, alphaSampler, uv).r;
+  return vec4f(textureSample(sourceTexture, sourceSampler, uv).rgb * weight, weight);
+}
+@fragment fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
+  let offset = 1.0 / vec2f(textureDimensions(sourceTexture));
+  var color = backgroundTap(input.uv) * 4.0;
+  color += backgroundTap(input.uv - offset);
+  color += backgroundTap(input.uv + offset);
+  color += backgroundTap(input.uv + vec2f(offset.x, -offset.y));
+  color += backgroundTap(input.uv - vec2f(offset.x, -offset.y));
+  return color / 8.0;
+}
+`;
+
+const MASK_COMPOSITE_FRAGMENT = /* wgsl */ `
 @group(0) @binding(0) var sourceTexture: texture_2d<f32>;
 @group(0) @binding(1) var sourceSampler: sampler;
 @group(1) @binding(0) var backgroundTexture: texture_2d<f32>;
 @group(1) @binding(1) var backgroundSampler: sampler;
-@group(2) @binding(0) var maskTexture: texture_2d<f32>;
-@group(2) @binding(1) var maskSampler: sampler;
-@group(3) @binding(0) var<uniform> params: CompositeParams;
+@group(2) @binding(0) var alphaTexture: texture_2d<f32>;
+@group(2) @binding(1) var alphaSampler: sampler;
 @fragment fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
-  let maskUv = vec2f(
-    dot(params.maskRow0.xyz, vec3f(input.uv, 1.0)),
-    dot(params.maskRow1.xyz, vec3f(input.uv, 1.0)),
-  );
-  // The mask only covers the square the model looked at. Outside it, sampling would clamp the
-  // mask's edge and smear the border foreground across the whole strip, so treat those pixels
-  // as background (they get blurred) instead.
-  let insideMask = all(maskUv >= vec2f(0.0)) && all(maskUv <= vec2f(1.0));
-  let confidence = select(0.0, textureSample(maskTexture, maskSampler, maskUv).r, insideMask);
-  let edgeFeather = params.settings.x;
-  let alpha = smoothstep(0.5 - edgeFeather, 0.5 + edgeFeather, confidence);
-  return mix(textureSample(backgroundTexture, backgroundSampler, input.uv), textureSample(sourceTexture, sourceSampler, input.uv), alpha);
+  let alpha = textureSample(alphaTexture, alphaSampler, input.uv).r;
+  // The blurred background is premultiplied by its background weight; dividing it out recovers
+  // the true background colour right up to the person's edge.
+  let blurred = textureSample(backgroundTexture, backgroundSampler, input.uv);
+  let background = blurred.rgb / max(blurred.a, 0.002);
+  let source = textureSample(sourceTexture, sourceSampler, input.uv).rgb;
+  return vec4f(mix(background, source, alpha), 1.0);
 }
 `;
 
@@ -174,6 +238,8 @@ export interface BackgroundPipelines {
   readonly uniformLayout: GPUBindGroupLayout;
   readonly copy: GPURenderPipeline;
   readonly downsample: GPURenderPipeline;
+  readonly personAlpha: GPURenderPipeline;
+  readonly maskedDownsample: GPURenderPipeline;
   readonly upsample: GPURenderPipeline;
   readonly maskComposite: GPURenderPipeline;
   readonly imageComposite: GPURenderPipeline;
@@ -208,6 +274,20 @@ export function createBackgroundPipelines(
       [textures],
       "fishjam-video-effect-blur-downsample",
     ),
+    personAlpha: createPipeline(
+      device,
+      PERSON_ALPHA_FRAGMENT,
+      "r8unorm",
+      [textures, uniforms],
+      "fishjam-video-effect-person-alpha",
+    ),
+    maskedDownsample: createPipeline(
+      device,
+      MASKED_DOWNSAMPLE_FRAGMENT,
+      "rgba8unorm",
+      [textures, textures],
+      "fishjam-video-effect-blur-masked-downsample",
+    ),
     upsample: createPipeline(
       device,
       UPSAMPLE_FRAGMENT,
@@ -219,7 +299,7 @@ export function createBackgroundPipelines(
       device,
       MASK_COMPOSITE_FRAGMENT,
       outputFormat,
-      [textures, textures, textures, uniforms],
+      [textures, textures, textures],
       "fishjam-video-effect-mask-composite",
     ),
     imageComposite: createPipeline(
@@ -249,10 +329,11 @@ export function createSampleTexture(
   width: number,
   height: number,
   label: string,
+  format: GPUTextureFormat = "rgba8unorm",
 ): { texture: GPUTexture; view: GPUTextureView } {
   const texture = device.createTexture({
     label,
-    format: "rgba8unorm",
+    format,
     size: [width, height],
     usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.RENDER_ATTACHMENT,
   });
