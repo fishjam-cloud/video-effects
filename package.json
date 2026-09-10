@@ -1,6 +1,6 @@
 {
   "name": "@fishjam-cloud/video-effects",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "WebGPU video effects and person-segmentation providers for Fishjam video sources",
   "license": "Apache-2.0",
   "author": "Fishjam Team",
