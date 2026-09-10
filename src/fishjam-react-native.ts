@@ -11,6 +11,10 @@
  */
 
 export {
+  type CameraEffectMiddlewareOptions,
+  createCameraEffectMiddleware,
+} from "./react-native/createCameraEffectMiddleware";
+export {
   type FishjamCameraEffectOptions,
   type FishjamCameraEffectResult,
   useFishjamCameraEffect,
@@ -58,3 +62,4 @@ export {
   useCameraWebGpuDevice,
   type UseCameraWebGpuDeviceResult,
 } from "./react-native/webgpu/useCameraWebGpuDevice";
+export { getCameraWebGpuDevice } from "./react-native/webgpu/useCameraWebGpuDevice";

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `createCameraEffectMiddleware(effect)` for React Native: a camera-track middleware for `useCamera().setCameraTrackMiddleware`, so an effect can be switched on from any screen without a provider or a hook.
+
 ## 0.1.2
 
 - Background blur: the person no longer bleeds into the blurred background (no halo), the outline is a smooth ramp that hugs the body, and similar-coloured background next to the person is no longer left sharp.

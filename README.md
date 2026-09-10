@@ -38,27 +38,32 @@ const effect = useBackgroundImage({
 
 `@fishjam-cloud/video-effects/fishjam-react-native` runs an effect on the camera track Fishjam already publishes, through `useCamera`'s camera-track middleware. No separate camera and no custom track: the app keeps using `useCamera`, and remote peers keep seeing `peer.cameraTrack`.
 
-```tsx
-import { useBackgroundBlur } from "@fishjam-cloud/video-effects/background-blur";
-import { useFishjamCameraEffect } from "@fishjam-cloud/video-effects/fishjam-react-native";
+```ts
+import { createBackgroundBlurEffect } from "@fishjam-cloud/video-effects/background-blur";
+import { createCameraEffectMiddleware } from "@fishjam-cloud/video-effects/fishjam-react-native";
 import { typeGpuPersonSegmentation } from "@fishjam-cloud/video-effects/segmentation/typegpu";
 
 const segmentation = typeGpuPersonSegmentation({ modelUrl });
-
-function BackgroundBlur({ enabled }: { enabled: boolean }) {
-  const blur = useBackgroundBlur({ segmentation, radius: 24 });
-  const { status, error } = useFishjamCameraEffect(enabled ? blur : null);
-  return null;
-}
+export const backgroundBlur = createCameraEffectMiddleware(
+  createBackgroundBlurEffect(() => ({ segmentation, radius: 24 })),
+);
 ```
 
-Mount it anywhere inside `FishjamProvider`. While the effect loads, the plain camera is published, so the track is never black. `status` goes `loading` → `ready`, or `unsupported` / `error` with `error` set; `retry()` builds the effect again.
+```tsx
+const { currentCameraMiddleware, setCameraTrackMiddleware } = useCamera();
+const isBlurOn = currentCameraMiddleware === backgroundBlur;
+<Button
+  onPress={() => setCameraTrackMiddleware(isBlurOn ? null : backgroundBlur)}
+/>;
+```
+
+The middleware lives in Fishjam's camera state, so it stays applied across screens until it is cleared with `null`. Switch it on once the camera is on. Pass `onStatus` in the options to follow loading and errors.
+
+For a component-scoped version there is `useFishjamCameraEffect(effect | null)`, the twin of the web hook; it clears the effect when the component unmounts.
 
 The model file ships in the package: `require("@fishjam-cloud/video-effects/assets/selfie_segmenter.ssgbin")` through `expo-asset` gives the `modelUrl`. Add `ssgbin` to Metro's `resolver.assetExts`.
 
 The app must have these installed and linked: `@fishjam-cloud/react-native-client`, `@fishjam-cloud/react-native-webrtc` (0.30.2 or newer), `@fishjam-cloud/react-native-worklets`, `react-native-worklets` (0.12 or newer, with its Babel plugin) and `react-native-webgpu`, with the New Architecture on. Android needs API 26.
-
-For custom rendering, `createCameraFrameProcessorSession` and the WebGPU helpers are exported from the same entry; the hook is built on them.
 
 ## Entry points
 
