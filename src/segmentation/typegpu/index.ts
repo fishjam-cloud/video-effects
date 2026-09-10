@@ -167,7 +167,7 @@ function offerFrame(
   device.queue.writeBuffer(
     state.bundle.upsampleParamsBuffer,
     0,
-    packUpsampleParams(crop, true),
+    packUpsampleParams(crop, false),
   );
   device.queue.writeBuffer(
     state.bundle.postProcessParamsBuffer,

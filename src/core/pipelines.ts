@@ -61,14 +61,25 @@ const UPSAMPLE_FRAGMENT = /* wgsl */ `
 // model looked at the mask would clamp to its edge and smear the border across the strip, so those
 // pixels count as background.
 const PERSON_ALPHA_FUNCTION = /* wgsl */ `
-fn personAlpha(maskUv: vec2f, feather: f32, erode: vec2f, threshold: f32) -> f32 {
-  let insideMask = all(maskUv >= vec2f(0.0)) && all(maskUv <= vec2f(1.0));
+fn erodedMask(maskUv: vec2f, erode: vec2f) -> f32 {
   var confidence = textureSample(maskTexture, maskSampler, maskUv).r;
   confidence = min(confidence, textureSample(maskTexture, maskSampler, maskUv + vec2f(erode.x, 0.0)).r);
   confidence = min(confidence, textureSample(maskTexture, maskSampler, maskUv - vec2f(erode.x, 0.0)).r);
   confidence = min(confidence, textureSample(maskTexture, maskSampler, maskUv + vec2f(0.0, erode.y)).r);
   confidence = min(confidence, textureSample(maskTexture, maskSampler, maskUv - vec2f(0.0, erode.y)).r);
-  let alpha = smoothstep(threshold - feather, threshold + feather, confidence);
+  return confidence;
+}
+fn personAlpha(maskUv: vec2f, feather: f32, erode: vec2f, threshold: f32) -> f32 {
+  let insideMask = all(maskUv >= vec2f(0.0)) && all(maskUv <= vec2f(1.0));
+  // The eroded mask keeps the coarse steps of the model output; averaging it over a small
+  // diamond turns those steps into a smooth ramp before the feather is applied.
+  let smoothing = erode * 0.75;
+  var confidence = erodedMask(maskUv, erode) * 2.0;
+  confidence += erodedMask(maskUv + vec2f(smoothing.x, smoothing.y), erode);
+  confidence += erodedMask(maskUv + vec2f(-smoothing.x, smoothing.y), erode);
+  confidence += erodedMask(maskUv + vec2f(smoothing.x, -smoothing.y), erode);
+  confidence += erodedMask(maskUv + vec2f(-smoothing.x, -smoothing.y), erode);
+  let alpha = smoothstep(threshold - feather, threshold + feather, confidence / 6.0);
   return select(0.0, alpha, insideMask);
 }
 `;

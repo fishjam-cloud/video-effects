@@ -31,9 +31,9 @@ import type {
 const MAX_BLUR_LEVELS = 4;
 // Outline treatment (see the personAlpha shader function): the mask is eroded by this many
 // texels, then blended with this threshold and feather.
-const EDGE_ERODE_PIXELS = 3;
-const EDGE_THRESHOLD = 0.55;
-const EDGE_FEATHER = 0.12;
+const EDGE_ERODE_PIXELS = 4;
+const EDGE_THRESHOLD = 0.6;
+const EDGE_FEATHER = 0.2;
 // A radius of this many source pixels is one resolution halving; each extra halving doubles it.
 const BLUR_LEVEL_BASE_PIXELS = 3;
 

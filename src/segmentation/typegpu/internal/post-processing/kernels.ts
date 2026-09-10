@@ -41,7 +41,7 @@ const UPSAMPLE_BAND_LOW = 0.05;
 const UPSAMPLE_BAND_HIGH = 0.95;
 const UPSAMPLE_RADIUS = 2;
 const UPSAMPLE_SPATIAL_SIGMA = 1.6;
-const UPSAMPLE_COLOR_SIGMA = 0.12;
+const UPSAMPLE_COLOR_SIGMA = 0.07;
 
 export const PostProcessParams = d.struct({
   initialized: d.u32,
