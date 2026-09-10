@@ -29,6 +29,11 @@ import type {
 } from "./types";
 
 const MAX_BLUR_LEVELS = 4;
+// Outline treatment (see the personAlpha shader function): the mask is eroded by this many
+// texels, then blended with this threshold and feather.
+const EDGE_ERODE_PIXELS = 3;
+const EDGE_THRESHOLD = 0.55;
+const EDGE_FEATHER = 0.12;
 // A radius of this many source pixels is one resolution halving; each extra halving doubles it.
 const BLUR_LEVEL_BASE_PIXELS = 3;
 
@@ -95,6 +100,9 @@ function writeMaskParams(
   buffer: GPUBuffer,
   mask: PersonMask,
   edgeFeather: number,
+  erodeU: number,
+  erodeV: number,
+  threshold: number,
 ): void {
   "worklet";
   const transform = mask.sourceUvToMaskUv;
@@ -111,9 +119,9 @@ function writeMaskParams(
       transform[5] ?? 0,
       0,
       edgeFeather,
-      0,
-      0,
-      0,
+      erodeU,
+      erodeV,
+      threshold,
     ]),
   );
 }
@@ -205,18 +213,34 @@ function encodeBlurFrame(
     return;
   }
 
-  // Dual Kawase: walk down the resolution ladder, then back up. The blur radius doubles with
-  // every level; the composite reads the half-resolution top rung with bilinear filtering.
   const sourceGroup = sourceGroupFor(blur, frame.source);
-  let readGroup = sourceGroup;
-  for (let index = 0; index < levels; index += 1) {
+  const maskGroup = maskGroupFor(blur, mask);
+  writeMaskParams(
+    blur.device,
+    blur.compositeParams,
+    mask,
+    clamp(options.edgeFeather, 0, 0.5, EDGE_FEATHER),
+    EDGE_ERODE_PIXELS / blur.width,
+    EDGE_ERODE_PIXELS / blur.height,
+    EDGE_THRESHOLD,
+  );
+
+  // Dual Kawase: walk down the resolution ladder, then back up. The blur radius doubles with
+  // every level; the composite reads the half-resolution top rung with bilinear filtering. The
+  // first rung keeps only the background (see the masked downsample shader).
+  drawFullscreen(
+    frame.commandEncoder,
+    blur.blurLevels[0].view,
+    blur.pipelines.maskedDownsample,
+    [sourceGroup, maskGroup, blur.compositeParamsGroup],
+  );
+  for (let index = 1; index < levels; index += 1) {
     drawFullscreen(
       frame.commandEncoder,
       blur.blurLevels[index].view,
       blur.pipelines.downsample,
-      [readGroup],
+      [blur.blurLevels[index - 1].group],
     );
-    readGroup = blur.blurLevels[index].group;
   }
   for (let index = levels - 1; index >= 1; index -= 1) {
     drawFullscreen(
@@ -227,12 +251,6 @@ function encodeBlurFrame(
     );
   }
 
-  writeMaskParams(
-    blur.device,
-    blur.compositeParams,
-    mask,
-    clamp(options.edgeFeather, 0, 0.5, 0.08),
-  );
   drawFullscreen(
     frame.commandEncoder,
     frame.output,
