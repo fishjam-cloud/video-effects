@@ -69,6 +69,8 @@ interface BlurState extends CommonState {
   readonly effectId: "fishjam.background-blur";
   /** Index 0 is half resolution; every next level halves again. */
   readonly blurLevels: BlurLevel[];
+  /** The person blend weight for this frame, at half resolution. */
+  readonly alpha: BlurLevel;
 }
 
 interface ImageState extends CommonState {
@@ -225,6 +227,15 @@ function encodeBlurFrame(
     EDGE_THRESHOLD,
   );
 
+  // The outline work (erode, smooth, feather) happens once, at half resolution; the blur and
+  // the composite then read the result with one tap each.
+  drawFullscreen(
+    frame.commandEncoder,
+    blur.alpha.view,
+    blur.pipelines.personAlpha,
+    [maskGroup, blur.compositeParamsGroup],
+  );
+
   // Dual Kawase: walk down the resolution ladder, then back up. The blur radius doubles with
   // every level; the composite reads the half-resolution top rung with bilinear filtering. The
   // first rung keeps only the background (see the masked downsample shader).
@@ -232,7 +243,7 @@ function encodeBlurFrame(
     frame.commandEncoder,
     blur.blurLevels[0].view,
     blur.pipelines.maskedDownsample,
-    [sourceGroup, maskGroup, blur.compositeParamsGroup],
+    [sourceGroup, blur.alpha.group],
   );
   for (let index = 1; index < levels; index += 1) {
     drawFullscreen(
@@ -255,12 +266,7 @@ function encodeBlurFrame(
     frame.commandEncoder,
     frame.output,
     blur.pipelines.maskComposite,
-    [
-      sourceGroup,
-      blur.blurLevels[0].group,
-      maskGroupFor(blur, mask),
-      blur.compositeParamsGroup,
-    ],
+    [sourceGroup, blur.blurLevels[0].group, blur.alpha.group],
   );
 }
 
@@ -480,10 +486,29 @@ export async function createBackgroundBlurSession(
       ),
     });
   }
+  const alphaTexture = createSampleTexture(
+    context.device,
+    blurLevels[0].width,
+    blurLevels[0].height,
+    "fishjam-video-effect-person-alpha",
+    "r8unorm",
+  );
+  const alpha: BlurLevel = {
+    ...alphaTexture,
+    width: blurLevels[0].width,
+    height: blurLevels[0].height,
+    group: createTextureBindGroup(
+      context.device,
+      common.pipelines.textureLayout,
+      alphaTexture.view,
+      common.pipelines.sampler,
+    ),
+  };
   const state: BlurState = {
     ...common,
     effectId: "fishjam.background-blur",
     blurLevels,
+    alpha,
   };
   const segmentation = await prepareSegmentation(
     state,
@@ -515,6 +540,7 @@ export async function createBackgroundBlurSession(
       disposed = true;
       disposeCommon(state, segmentation);
       for (const level of state.blurLevels) level.texture.destroy();
+      state.alpha.texture.destroy();
     },
   };
 }

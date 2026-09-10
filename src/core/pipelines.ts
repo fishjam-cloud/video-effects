@@ -94,20 +94,30 @@ struct CompositeParams {
 };
 `;
 
+// Turns the person mask into the blend weight once per frame, at half resolution: the erosion
+// and smoothing taps run here and nowhere else. Consumers read the result with a single tap.
+const PERSON_ALPHA_FRAGMENT = /* wgsl */ `
+${COMPOSITE_PARAMS_STRUCT}
+@group(0) @binding(0) var maskTexture: texture_2d<f32>;
+@group(0) @binding(1) var maskSampler: sampler;
+@group(1) @binding(0) var<uniform> params: CompositeParams;
+${PERSON_ALPHA_FUNCTION}
+@fragment fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
+  let maskUv = vec2f(dot(params.maskRow0.xyz, vec3f(input.uv, 1.0)), dot(params.maskRow1.xyz, vec3f(input.uv, 1.0)));
+  return vec4f(personAlpha(maskUv, params.settings.x, params.settings.yz, params.settings.w), 0.0, 0.0, 1.0);
+}
+`;
+
 // First rung of the blur ladder: the same five-tap downsample, but every tap is weighted by how
 // much background it holds and the weight travels in alpha. Blurring only the background keeps
 // the person's colours from bleeding into it, which is what shows as a halo around the outline.
 const MASKED_DOWNSAMPLE_FRAGMENT = /* wgsl */ `
-${COMPOSITE_PARAMS_STRUCT}
 @group(0) @binding(0) var sourceTexture: texture_2d<f32>;
 @group(0) @binding(1) var sourceSampler: sampler;
-@group(1) @binding(0) var maskTexture: texture_2d<f32>;
-@group(1) @binding(1) var maskSampler: sampler;
-@group(2) @binding(0) var<uniform> params: CompositeParams;
-${PERSON_ALPHA_FUNCTION}
+@group(1) @binding(0) var alphaTexture: texture_2d<f32>;
+@group(1) @binding(1) var alphaSampler: sampler;
 fn backgroundTap(uv: vec2f) -> vec4f {
-  let maskUv = vec2f(dot(params.maskRow0.xyz, vec3f(uv, 1.0)), dot(params.maskRow1.xyz, vec3f(uv, 1.0)));
-  let weight = 1.0 - personAlpha(maskUv, params.settings.x, params.settings.yz, params.settings.w);
+  let weight = 1.0 - textureSample(alphaTexture, alphaSampler, uv).r;
   return vec4f(textureSample(sourceTexture, sourceSampler, uv).rgb * weight, weight);
 }
 @fragment fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
@@ -122,21 +132,14 @@ fn backgroundTap(uv: vec2f) -> vec4f {
 `;
 
 const MASK_COMPOSITE_FRAGMENT = /* wgsl */ `
-${COMPOSITE_PARAMS_STRUCT}
 @group(0) @binding(0) var sourceTexture: texture_2d<f32>;
 @group(0) @binding(1) var sourceSampler: sampler;
 @group(1) @binding(0) var backgroundTexture: texture_2d<f32>;
 @group(1) @binding(1) var backgroundSampler: sampler;
-@group(2) @binding(0) var maskTexture: texture_2d<f32>;
-@group(2) @binding(1) var maskSampler: sampler;
-@group(3) @binding(0) var<uniform> params: CompositeParams;
-${PERSON_ALPHA_FUNCTION}
+@group(2) @binding(0) var alphaTexture: texture_2d<f32>;
+@group(2) @binding(1) var alphaSampler: sampler;
 @fragment fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
-  let maskUv = vec2f(
-    dot(params.maskRow0.xyz, vec3f(input.uv, 1.0)),
-    dot(params.maskRow1.xyz, vec3f(input.uv, 1.0)),
-  );
-  let alpha = personAlpha(maskUv, params.settings.x, params.settings.yz, params.settings.w);
+  let alpha = textureSample(alphaTexture, alphaSampler, input.uv).r;
   // The blurred background is premultiplied by its background weight; dividing it out recovers
   // the true background colour right up to the person's edge.
   let blurred = textureSample(backgroundTexture, backgroundSampler, input.uv);
@@ -235,6 +238,7 @@ export interface BackgroundPipelines {
   readonly uniformLayout: GPUBindGroupLayout;
   readonly copy: GPURenderPipeline;
   readonly downsample: GPURenderPipeline;
+  readonly personAlpha: GPURenderPipeline;
   readonly maskedDownsample: GPURenderPipeline;
   readonly upsample: GPURenderPipeline;
   readonly maskComposite: GPURenderPipeline;
@@ -270,11 +274,18 @@ export function createBackgroundPipelines(
       [textures],
       "fishjam-video-effect-blur-downsample",
     ),
+    personAlpha: createPipeline(
+      device,
+      PERSON_ALPHA_FRAGMENT,
+      "r8unorm",
+      [textures, uniforms],
+      "fishjam-video-effect-person-alpha",
+    ),
     maskedDownsample: createPipeline(
       device,
       MASKED_DOWNSAMPLE_FRAGMENT,
       "rgba8unorm",
-      [textures, textures, uniforms],
+      [textures, textures],
       "fishjam-video-effect-blur-masked-downsample",
     ),
     upsample: createPipeline(
@@ -288,7 +299,7 @@ export function createBackgroundPipelines(
       device,
       MASK_COMPOSITE_FRAGMENT,
       outputFormat,
-      [textures, textures, textures, uniforms],
+      [textures, textures, textures],
       "fishjam-video-effect-mask-composite",
     ),
     imageComposite: createPipeline(
@@ -318,10 +329,11 @@ export function createSampleTexture(
   width: number,
   height: number,
   label: string,
+  format: GPUTextureFormat = "rgba8unorm",
 ): { texture: GPUTexture; view: GPUTextureView } {
   const texture = device.createTexture({
     label,
-    format: "rgba8unorm",
+    format,
     size: [width, height],
     usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.RENDER_ATTACHMENT,
   });
