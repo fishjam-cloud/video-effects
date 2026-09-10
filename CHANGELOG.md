@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.1.2
 
 - Background blur: the person no longer bleeds into the blurred background (no halo), the outline is a smooth ramp that hugs the body, and similar-coloured background next to the person is no longer left sharp.
+- The outline weight is computed once per frame, so the frame's GPU cost is unchanged from 0.1.1.
 
 ## 0.1.1
 
