@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3
 
 - `createCameraEffectMiddleware(effect)` for React Native: a camera-track middleware for `useCamera().setCameraTrackMiddleware`, so an effect can be switched on from any screen without a provider or a hook.
 - The TypeGPU segmentation model is fetched and parsed once per URL and shared by later sessions, so switching an effect on again or restarting the camera does not reload it.
