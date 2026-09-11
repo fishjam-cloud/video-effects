@@ -25,7 +25,8 @@ async function acquireSharedCameraWebGpuDevice(): Promise<GPUDevice> {
   });
 }
 
-function getSharedCameraWebGpuDevice(): Promise<GPUDevice> {
+/** The app-wide GPUDevice for camera work, acquired on first use and shared afterwards. */
+export function getCameraWebGpuDevice(): Promise<GPUDevice> {
   if (sharedDevicePromise == null) {
     // Only this promise may clear the slot: by the time a loss (or failure) callback fires, a
     // replacement device may already occupy it, and unconditionally nulling would discard that
@@ -80,7 +81,7 @@ export function useCameraWebGpuDevice(): UseCameraWebGpuDeviceResult {
 
   useEffect(() => {
     let cancelled = false;
-    getSharedCameraWebGpuDevice()
+    getCameraWebGpuDevice()
       .then((device) => {
         if (!cancelled) {
           setResult({ device, error: null });
