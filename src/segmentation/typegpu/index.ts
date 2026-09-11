@@ -17,7 +17,10 @@ import {
   packFrameCropParams,
   packUpsampleParams,
 } from "./internal/frameParams";
-import { parseSegmenterPlan } from "./internal/inference/bundle";
+import {
+  parseSegmenterPlan,
+  type SegmenterPlan,
+} from "./internal/inference/bundle";
 import {
   buildSegmentationBundle,
   type SegmentationBundle,
@@ -65,8 +68,7 @@ async function createTypeGpuSession(
   context: SegmentationContext,
   options: TypeGpuPersonSegmentationOptions,
 ): Promise<PersonSegmentationSession> {
-  const buffer = await loadModel(options.modelUrl ?? DEFAULT_MODEL_URL);
-  const plan = parseSegmenterPlan(buffer);
+  const plan = await loadSegmenterPlan(options.modelUrl ?? DEFAULT_MODEL_URL);
   const root = await tgpu.initFromDevice({ device: context.device });
   const bundle = buildSegmentationBundle(
     root,
@@ -211,6 +213,20 @@ function resetTimeline(kernelState: PersonSegmentationKernelState): void {
   const state = kernelState as TypeGpuState;
   state.initialized = false;
   state.timestampUs = Number.NEGATIVE_INFINITY;
+}
+
+// The parsed plan is immutable and shared by every session made from the same URL, so a camera
+// restart or an effect toggle skips the fetch and the parse. A failed load is forgotten, so the
+// next attempt fetches again.
+const segmenterPlanCache = new Map<string, Promise<SegmenterPlan>>();
+
+function loadSegmenterPlan(url: string): Promise<SegmenterPlan> {
+  const cached = segmenterPlanCache.get(url);
+  if (cached) return cached;
+  const loading = loadModel(url).then(parseSegmenterPlan);
+  segmenterPlanCache.set(url, loading);
+  loading.catch(() => segmenterPlanCache.delete(url));
+  return loading;
 }
 
 async function loadModel(url: string): Promise<ArrayBuffer> {
