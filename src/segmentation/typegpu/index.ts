@@ -36,6 +36,12 @@ const PROVIDER_ID = "typegpu-selfie-segmentation-experimental";
 export interface TypeGpuPersonSegmentationOptions {
   /** CDN or application asset URL. The default points at this package's bundled model. */
   readonly modelUrl?: string;
+  /**
+   * Supplies the model bytes instead of fetching `modelUrl`, for a model the platform cannot serve
+   * over `fetch`, such as an asset embedded in a React Native release build. Keep the function's
+   * identity stable (create it once), so the parsed model is shared between sessions.
+   */
+  readonly loadModel?: () => Promise<ArrayBuffer>;
 }
 
 // Plain data only (numbers plus GPU objects): the state is copied onto the camera thread's
@@ -68,7 +74,7 @@ async function createTypeGpuSession(
   context: SegmentationContext,
   options: TypeGpuPersonSegmentationOptions,
 ): Promise<PersonSegmentationSession> {
-  const plan = await loadSegmenterPlan(options.modelUrl ?? DEFAULT_MODEL_URL);
+  const plan = await loadSegmenterPlan(options);
   const root = await tgpu.initFromDevice({ device: context.device });
   const bundle = buildSegmentationBundle(
     root,
@@ -215,21 +221,43 @@ function resetTimeline(kernelState: PersonSegmentationKernelState): void {
   state.timestampUs = Number.NEGATIVE_INFINITY;
 }
 
-// The parsed plan is immutable and shared by every session made from the same URL, so a camera
-// restart or an effect toggle skips the fetch and the parse. A failed load is forgotten, so the
-// next attempt fetches again.
-const segmenterPlanCache = new Map<string, Promise<SegmenterPlan>>();
+// The parsed plan is immutable and shared by every session made from the same URL or loader, so
+// a camera restart or an effect toggle skips the fetch and the parse. A failed load is forgotten,
+// so the next attempt loads again.
+type ModelLoader = () => Promise<ArrayBuffer>;
+const plansByUrl = new Map<string, Promise<SegmenterPlan>>();
+const plansByLoader = new WeakMap<ModelLoader, Promise<SegmenterPlan>>();
 
-function loadSegmenterPlan(url: string): Promise<SegmenterPlan> {
-  const cached = segmenterPlanCache.get(url);
+function loadSegmenterPlan(
+  options: TypeGpuPersonSegmentationOptions,
+): Promise<SegmenterPlan> {
+  if (options.loadModel) {
+    return cachedPlan(plansByLoader, options.loadModel, options.loadModel);
+  }
+  const url = options.modelUrl ?? DEFAULT_MODEL_URL;
+  return cachedPlan(plansByUrl, url, () => fetchModel(url));
+}
+
+interface PlanCache<Key> {
+  get(key: Key): Promise<SegmenterPlan> | undefined;
+  set(key: Key, plan: Promise<SegmenterPlan>): unknown;
+  delete(key: Key): unknown;
+}
+
+function cachedPlan<Key>(
+  cache: PlanCache<Key>,
+  key: Key,
+  load: ModelLoader,
+): Promise<SegmenterPlan> {
+  const cached = cache.get(key);
   if (cached) return cached;
-  const loading = loadModel(url).then(parseSegmenterPlan);
-  segmenterPlanCache.set(url, loading);
-  loading.catch(() => segmenterPlanCache.delete(url));
+  const loading = load().then(parseSegmenterPlan);
+  cache.set(key, loading);
+  loading.catch(() => cache.delete(key));
   return loading;
 }
 
-async function loadModel(url: string): Promise<ArrayBuffer> {
+async function fetchModel(url: string): Promise<ArrayBuffer> {
   const response = await fetch(url);
   if (!response.ok)
     throw new Error(
