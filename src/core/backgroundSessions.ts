@@ -572,6 +572,8 @@ export async function createBackgroundImageSession(
   // which a worklet runtime holding its own copy will not observe.
   let imageSource: BackgroundImageOptions["image"] | null = null;
   let loadingImage: Promise<void> | null = null;
+  let imageError: Error | null = null;
+  let isPrepared = false;
   const ensureImage = (
     source: BackgroundImageOptions["image"],
   ): Promise<void> => {
@@ -591,8 +593,11 @@ export async function createBackgroundImageSession(
         );
         previous?.texture.destroy();
       })
-      .catch(() => {
-        // The effect remains a passthrough until the caller supplies a valid image.
+      .catch((cause: unknown) => {
+        // The effect remains a passthrough until the caller supplies a valid image. Report the
+        // failure, but not before the segmentation status settles, or its "ready" would hide it.
+        imageError = asError(cause);
+        if (isPrepared) context.onStatus?.("error", imageError);
       })
       .finally(() => {
         loadingImage = null;
@@ -604,6 +609,8 @@ export async function createBackgroundImageSession(
     prepareSegmentation(state, context, getOptions().segmentation),
     ensureImage(getOptions().image),
   ]);
+  isPrepared = true;
+  if (imageError != null) context.onStatus?.("error", imageError);
   const frameKernel: VideoEffectFrameKernel<BackgroundImageFrameOptions> = {
     state,
     offer: offerToSegmentation,
