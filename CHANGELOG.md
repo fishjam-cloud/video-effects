@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Background image: the image loads on React Native. React Native's `Blob` cannot wrap an `ArrayBuffer`, so decoding threw and the effect silently stayed a passthrough; the bytes now go to `createImageBitmap` directly there.
+- Background image: a failure to load the image is reported through `onStatus` as `"error"` instead of being swallowed.
+
 ## 0.1.3
 
 - `createCameraEffectMiddleware(effect)` for React Native: a camera-track middleware for `useCamera().setCameraTrackMiddleware`, so an effect can be switched on from any screen without a provider or a hook.

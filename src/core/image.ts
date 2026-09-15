@@ -28,12 +28,19 @@ async function decodeImage(
   const createBitmap = globalThis.createImageBitmap as unknown as (
     value: Blob | ArrayBuffer,
   ) => Promise<ImageBitmap>;
-  if (typeof Blob !== "undefined") {
-    return createBitmap(
-      new Blob([bytes], { type: source.mimeType ?? "image/*" }),
-    );
+  const blob = toBlob(bytes, source.mimeType);
+  return createBitmap(blob ?? bytes);
+}
+
+// Browsers decode a Blob. React Native has a Blob global too, but it cannot wrap an
+// ArrayBuffer (it throws), and react-native-webgpu's createImageBitmap takes the bytes directly.
+function toBlob(bytes: ArrayBuffer, mimeType: string | undefined): Blob | null {
+  if (typeof Blob === "undefined") return null;
+  try {
+    return new Blob([bytes], { type: mimeType ?? "image/*" });
+  } catch {
+    return null;
   }
-  return createBitmap(bytes);
 }
 
 function fetchRequired(uri: string | undefined): Promise<Response> {
