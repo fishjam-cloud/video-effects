@@ -200,6 +200,11 @@ export function createWebGpuFrameRenderer(
         };
 
         onFrame(render);
+        if (!rendered) {
+          // A dropped frame still imported the camera. Dawn frees that import only after queue work
+          // completes, so with nothing submitted every skipped frame's camera buffer stays alive.
+          device.queue.submit([]);
+        }
       } finally {
         // End the camera texture's access window now — waiting for GC would starve the camera's
         // own frame buffer pool.
