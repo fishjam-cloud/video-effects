@@ -1,6 +1,7 @@
-import { GPUShaderStage } from "react-native-webgpu";
 import tgpu, { type TgpuFn } from "typegpu";
 import * as d from "typegpu/data";
+
+import { SHADER_STAGE } from "../../core/constants";
 
 // The camera arrives as a `texture_external`, which TypeGPU 0.11 cannot resolve inside a TGSL
 // function (its type only resolves as a declaration, not as a sampled value in codegen). So
@@ -141,8 +142,8 @@ export function createCameraShaderBindings(
   const bindGroupLayout = device.createBindGroupLayout({
     label: "fishjam-camera-shader-bindings",
     entries: [
-      { binding: 0, visibility: GPUShaderStage.FRAGMENT, externalTexture: {} },
-      { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+      { binding: 0, visibility: SHADER_STAGE.FRAGMENT, externalTexture: {} },
+      { binding: 1, visibility: SHADER_STAGE.FRAGMENT, sampler: {} },
     ],
   });
   const sampler = device.createSampler({

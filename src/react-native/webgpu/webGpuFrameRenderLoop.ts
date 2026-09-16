@@ -3,11 +3,9 @@ import {
   type PooledTrack,
   pushFrame,
 } from "@fishjam-cloud/react-native-webrtc";
-import {
-  type GPUSharedTextureMemory,
-  GPUTextureUsage,
-} from "react-native-webgpu";
+import type { GPUSharedTextureMemory } from "react-native-webgpu";
 
+import { TEXTURE_USAGE } from "../../core/constants";
 import type { WorkletBufferDescriptor } from "../internal/pooledTrackAllocation";
 import {
   type CameraShaderBindings,
@@ -84,8 +82,8 @@ export function createWebGpuFrameRenderer(
 
   const runtime: WebGpuRuntime = getWebGpuRuntime();
   const outputSurfaceFormat = getOutputSurfaceFormat();
-  // Captured as a plain number: the worklet must not close over the GPUTextureUsage namespace.
-  const renderAttachmentUsage = GPUTextureUsage.RENDER_ATTACHMENT;
+  // Captured as a plain number so the worklet does not close over an object.
+  const renderAttachmentUsage = TEXTURE_USAGE.RENDER_ATTACHMENT;
   const state: RendererState = { poolCursor: 0, importedByIndex: {} };
 
   const renderFrame = (

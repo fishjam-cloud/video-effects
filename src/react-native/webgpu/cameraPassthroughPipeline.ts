@@ -1,8 +1,8 @@
-import { GPUBufferUsage, GPUShaderStage } from "react-native-webgpu";
 import tgpu from "typegpu";
 import * as d from "typegpu/data";
 import { add, div, mul, sub } from "typegpu/std";
 
+import { BUFFER_USAGE, SHADER_STAGE } from "../../core/constants";
 import {
   type CameraPixelLayout,
   type CameraShaderBindings,
@@ -145,7 +145,7 @@ export function createCameraPassthroughPipeline(
     entries: [
       {
         binding: 0,
-        visibility: GPUShaderStage.FRAGMENT,
+        visibility: SHADER_STAGE.FRAGMENT,
         buffer: { type: "uniform" },
       },
     ],
@@ -153,7 +153,7 @@ export function createCameraPassthroughPipeline(
   const cropParamsBuffer = device.createBuffer({
     label: "fishjam-camera-passthrough-crop-params",
     size: FRAME_CROP_BUFFER_BYTES,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    usage: BUFFER_USAGE.UNIFORM | BUFFER_USAGE.COPY_DST,
   });
   const cropBindGroup = device.createBindGroup({
     layout: cropBindGroupLayout,
