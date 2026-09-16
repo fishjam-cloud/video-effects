@@ -1461,7 +1461,7 @@ __metadata:
     react: "npm:19.1.0"
     react-native: "npm:0.86.3"
     react-native-builder-bob: "npm:^0.18.2"
-    react-native-webgpu: "npm:0.5.15"
+    react-native-webgpu: "npm:0.10.1"
     typed-binary: "npm:^4.3.3"
     typegpu: "npm:^0.12.0"
     typescript: "npm:^5.8.3"
@@ -5335,9 +5335,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-native-webgpu@npm:0.5.15":
-  version: 0.5.15
-  resolution: "react-native-webgpu@npm:0.5.15"
+"react-native-webgpu@npm:0.10.1":
+  version: 0.10.1
+  resolution: "react-native-webgpu@npm:0.10.1"
   peerDependencies:
     react: "*"
     react-native: ">=0.81.0"
@@ -5348,7 +5348,7 @@ __metadata:
       optional: true
     react-native-worklets:
       optional: true
-  checksum: 10c0/91430eb36a5ff5f7e43519a79b384bc9648776c2b4788900e8f9154a706cc8c60c101decc3ef32631cef300f2f636e9aeb038ccf90b15dd8cbb7f8381f39fa4b
+  checksum: 10c0/fd72b41e19819008d6966159a153589fd04f06c1d8ef1665ed37f3ba76af1096ff9e8eff0bbbf1f4d0ee2f59377e675e95d41286166f4e58488e845a038b93ca
   languageName: node
   linkType: hard
 
