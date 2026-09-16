@@ -13,6 +13,12 @@ export const BUFFER_USAGE = {
   UNIFORM: 0x40,
 } as const;
 
+export const SHADER_STAGE = {
+  VERTEX: 0x1,
+  FRAGMENT: 0x2,
+  COMPUTE: 0x4,
+} as const;
+
 export const IDENTITY_UV_TRANSFORM = new Float32Array([
   1, 0, 0, 0, 1, 0, 0, 0, 1,
 ]);

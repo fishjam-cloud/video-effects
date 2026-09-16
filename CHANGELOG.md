@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- React Native: the WebGPU usage and shader-stage flags are now the package's own constants instead of the `GPUTextureUsage` / `GPUShaderStage` / `GPUBufferUsage` re-exports of `react-native-webgpu`. Since react-native-webgpu 0.8.4 those re-exports are `undefined` (the module reads the globals before the native install runs), which made every camera effect fail with `Cannot read property 'TEXTURE_BINDING' of undefined`.
+
 ## 0.1.4
 
 - Background image: the image loads on React Native. React Native's `Blob` cannot wrap an `ArrayBuffer`, so decoding threw and the effect silently stayed a passthrough; the bytes now go to `createImageBitmap` directly there.

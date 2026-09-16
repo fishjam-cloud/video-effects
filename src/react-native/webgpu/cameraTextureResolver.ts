@@ -1,5 +1,4 @@
-import { GPUTextureUsage } from "react-native-webgpu";
-
+import { TEXTURE_USAGE } from "../../core/constants";
 import {
   createCameraPassthroughPipeline,
   encodeCameraPassthrough,
@@ -50,7 +49,7 @@ export function createCameraTextureResolver(
     label: "fishjam-resolved-camera",
     format: "rgba8unorm",
     size: [size.width, size.height],
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.RENDER_ATTACHMENT,
   });
   return {
     texture,
