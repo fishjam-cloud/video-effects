@@ -178,6 +178,33 @@ export interface VideoEffectImageSource {
 export interface BackgroundImageOptions extends SegmentationOptions {
   readonly image: VideoEffectImageSource;
   readonly fit?: "cover" | "contain";
+  /**
+   * Aspect ratio (width / height) of the centered part of the output that a `fit: "cover"` image
+   * covers. Set it to the shape in which viewers see the video when a layout crops the video
+   * around its center. Defaults to the aspect ratio of the output. `fit: "contain"` ignores it.
+   *
+   * ```text
+   * 720x1280 output, 4:3 image, viewers see a centered 4:3 tile
+   *
+   *  no coverAspectRatio        coverAspectRatio: 4 / 3
+   * +------------------+        +------------------+
+   * |                  |        |                  |
+   * |                  |        |   mirror copy    |
+   * |                  |        |                  |
+   * :..................:        +------------------+
+   * :  the tile shows  :        |                  |
+   * :  18 % of the     :        |   whole image    |  <- the tile shows this part
+   * :  image           :        |                  |
+   * :..................:        +------------------+
+   * |                  |        |                  |
+   * |                  |        |   mirror copy    |
+   * |                  |        |                  |
+   * +------------------+        +------------------+
+   *  the image covers            the image covers
+   *  the full output             the 4:3 part
+   * ```
+   */
+  readonly coverAspectRatio?: number;
   readonly backgroundColor?: readonly [number, number, number, number];
 }
 

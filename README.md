@@ -34,6 +34,18 @@ const effect = useBackgroundImage({
 });
 ```
 
+With `fit: "cover"` the image covers the full output. When viewers see the output cropped around its center, for example a portrait video in a 4:3 tile with `objectFit: "cover"`, most of the image is outside the visible part. `coverAspectRatio` (width / height) fits the image to the largest centered part of the output that has this shape:
+
+```tsx
+const effect = useBackgroundImage({
+  segmentation,
+  image,
+  coverAspectRatio: 4 / 3,
+});
+```
+
+The camera picture does not change. Outside that part the image continues as a mirror copy, so a viewer that crops to a different shape sees no bars.
+
 ## Fishjam React Native camera
 
 `@fishjam-cloud/video-effects/fishjam-react-native` runs an effect on the camera track Fishjam already publishes, through `useCamera`'s camera-track middleware. No separate camera and no custom track: the app keeps using `useCamera`, and remote peers keep seeing `peer.cameraTrack`.

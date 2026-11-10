@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Background image: `coverAspectRatio` fits a `fit: "cover"` image to the largest centered part of the output that has this aspect ratio, for layouts that show the video cropped around its center (a portrait video in a 4:3 tile, for example). Outside that part the image continues as a mirror copy. Without the option the image covers the full output as before.
+
 ## 0.1.5
 
 - React Native: the WebGPU usage and shader-stage flags are now the package's own constants instead of the `GPUTextureUsage` / `GPUShaderStage` / `GPUBufferUsage` re-exports of `react-native-webgpu`. Since react-native-webgpu 0.8.4 those re-exports are `undefined` (the module reads the globals before the native install runs), which made every camera effect fail with `Cannot read property 'TEXTURE_BINDING' of undefined`.
