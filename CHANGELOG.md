@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Background image: `coverAspectRatio` fits a `fit: "cover"` image to the largest centered part of the output that has this aspect ratio, for layouts that show the video cropped around its center (a portrait video in a 4:3 tile, for example). Outside that part the image continues as a mirror copy. Without the option the image covers the full output as before.
+- Background image: `coverAspectRatio` also accepts a `Synchronizable` from `react-native-worklets`, which is read on every frame, so the fit can follow a layout change on React Native while the effect runs.
 
 ## 0.1.5
 

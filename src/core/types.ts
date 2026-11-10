@@ -175,6 +175,17 @@ export interface VideoEffectImageSource {
   readonly mimeType?: string;
 }
 
+// This file is shared with the web entry points, where `react-native-worklets` (an optional
+// peer) is not installed. So the shape is declared here, with no import of its types.
+/**
+ * A value that an effect reads on every frame, so it can change while the effect runs.
+ * On React Native, pass a `Synchronizable` from `react-native-worklets`
+ * (`createSynchronizable(value)`) and change it with `setBlocking`.
+ */
+export interface SynchronizableSource<TValue> {
+  getBlocking(): TValue;
+}
+
 export interface BackgroundImageOptions extends SegmentationOptions {
   readonly image: VideoEffectImageSource;
   readonly fit?: "cover" | "contain";
@@ -203,8 +214,13 @@ export interface BackgroundImageOptions extends SegmentationOptions {
    *  the image covers            the image covers
    *  the full output             the 4:3 part
    * ```
+   *
+   * On React Native the frame worklet works on a copy of the options, so a new number does not
+   * reach a running effect. To change the value while the effect runs, pass a `Synchronizable`
+   * from `react-native-worklets` and keep the same one for the life of the effect. It is read on
+   * every frame.
    */
-  readonly coverAspectRatio?: number;
+  readonly coverAspectRatio?: number | SynchronizableSource<number>;
   readonly backgroundColor?: readonly [number, number, number, number];
 }
 

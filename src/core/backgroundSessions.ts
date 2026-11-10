@@ -341,13 +341,18 @@ function encodeImageFrame(
     encodeCopy(image, frame);
     return;
   }
+  // A Synchronizable is shared with this runtime, so it gives the current value on every frame.
+  const coverAspectRatio =
+    typeof options.coverAspectRatio === "number"
+      ? options.coverAspectRatio
+      : options.coverAspectRatio?.getBlocking();
   const fit = imageTransform(
     image.width,
     image.height,
     image.image.width,
     image.image.height,
     options.fit ?? "cover",
-    options.coverAspectRatio,
+    coverAspectRatio,
   );
   const transform = mask.sourceUvToMaskUv;
   const backgroundColor = options.backgroundColor ?? [0, 0, 0, 1];

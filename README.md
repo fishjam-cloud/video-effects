@@ -71,6 +71,24 @@ const isBlurOn = currentCameraMiddleware === backgroundBlur;
 
 The middleware lives in Fishjam's camera state, so it stays applied across screens until it is cleared with `null`. Switch it on once the camera is on. Pass `onStatus` in the options to follow loading and errors.
 
+The frame worklet works on a copy of the effect options, taken when the middleware starts on a track. To change `coverAspectRatio` of a background image while the effect runs, pass a `Synchronizable` from `react-native-worklets`. It is read on every frame:
+
+```ts
+import { createSynchronizable } from "react-native-worklets";
+
+const tileAspectRatio = createSynchronizable(4 / 3);
+export const backgroundImage = createCameraEffectMiddleware(
+  createBackgroundImageEffect(() => ({
+    segmentation,
+    image,
+    coverAspectRatio: tileAspectRatio,
+  })),
+);
+
+// When the layout shows the video in a different shape:
+tileAspectRatio.setBlocking(2 / 3);
+```
+
 For a component-scoped version there is `useFishjamCameraEffect(effect | null)`, the twin of the web hook; it clears the effect when the component unmounts.
 
 The model file ships in the package: `require("@fishjam-cloud/video-effects/assets/selfie_segmenter.ssgbin")` through `expo-asset` gives the `modelUrl`. Add `ssgbin` to Metro's `resolver.assetExts`.
