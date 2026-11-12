@@ -174,7 +174,9 @@ struct ImageParams {
   );
   let imageUv = input.uv * params.imageScale + params.imageOffset;
   let insideImage = all(imageUv >= vec2f(0.0)) && all(imageUv <= vec2f(1.0));
-  let imageColor = select(params.backgroundColor, textureSample(imageTexture, imageSampler, imageUv), insideImage || params.contains < 0.5);
+  // Outside its edges the image continues as a mirror copy, which a cover aspect ratio can show.
+  let mirroredUv = vec2f(1.0) - abs(fract(imageUv * 0.5) * 2.0 - vec2f(1.0));
+  let imageColor = select(params.backgroundColor, textureSample(imageTexture, imageSampler, mirroredUv), insideImage || params.contains < 0.5);
   // Outside the model's square, treat as background so the mask edge is not smeared across the strip.
   let insideMask = all(maskUv >= vec2f(0.0)) && all(maskUv <= vec2f(1.0));
   let confidence = select(0.0, textureSample(maskTexture, maskSampler, maskUv).r, insideMask);

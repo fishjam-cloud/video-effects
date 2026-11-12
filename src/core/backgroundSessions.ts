@@ -280,26 +280,28 @@ function imageTransform(
   imageWidth: number,
   imageHeight: number,
   fit: "cover" | "contain",
+  coverAspectRatio: number | undefined,
 ) {
   "worklet";
   const outputAspect = outputWidth / outputHeight;
   const imageAspect = imageWidth / imageHeight;
   if (fit === "cover") {
-    if (imageAspect > outputAspect) {
-      const scaleX = outputAspect / imageAspect;
-      return {
-        scaleX,
-        scaleY: 1,
-        offsetX: (1 - scaleX) / 2,
-        offsetY: 0,
-        contains: false,
-      };
-    }
-    const scaleY = imageAspect / outputAspect;
+    // The image covers the largest centered part of the output that has the cover aspect ratio,
+    // which is the whole output by default. The size of that part is a fraction of the output.
+    const regionAspect = clamp(coverAspectRatio, 0.01, 100, outputAspect);
+    const regionWidth = Math.min(1, regionAspect / outputAspect);
+    const regionHeight = Math.min(1, outputAspect / regionAspect);
+    const imageIsWider = imageAspect > regionAspect;
+    const scaleX = imageIsWider
+      ? outputAspect / (imageAspect * regionHeight)
+      : 1 / regionWidth;
+    const scaleY = imageIsWider
+      ? 1 / regionHeight
+      : imageAspect / (outputAspect * regionWidth);
     return {
-      scaleX: 1,
+      scaleX,
       scaleY,
-      offsetX: 0,
+      offsetX: (1 - scaleX) / 2,
       offsetY: (1 - scaleY) / 2,
       contains: false,
     };
@@ -339,12 +341,18 @@ function encodeImageFrame(
     encodeCopy(image, frame);
     return;
   }
+  // A Synchronizable is shared with this runtime, so it gives the current value on every frame.
+  const coverAspectRatio =
+    typeof options.coverAspectRatio === "number"
+      ? options.coverAspectRatio
+      : options.coverAspectRatio?.getBlocking();
   const fit = imageTransform(
     image.width,
     image.height,
     image.image.width,
     image.image.height,
     options.fit ?? "cover",
+    coverAspectRatio,
   );
   const transform = mask.sourceUvToMaskUv;
   const backgroundColor = options.backgroundColor ?? [0, 0, 0, 1];

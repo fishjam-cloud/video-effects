@@ -47,6 +47,7 @@ export function createBackgroundImageEffect(
         enabled: options.enabled,
         edgeFeather: options.edgeFeather,
         fit: options.fit,
+        coverAspectRatio: options.coverAspectRatio,
         backgroundColor: options.backgroundColor,
       };
     },

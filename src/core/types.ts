@@ -175,9 +175,52 @@ export interface VideoEffectImageSource {
   readonly mimeType?: string;
 }
 
+// This file is shared with the web entry points, where `react-native-worklets` (an optional
+// peer) is not installed. So the shape is declared here, with no import of its types.
+/**
+ * A value that an effect reads on every frame, so it can change while the effect runs.
+ * On React Native, pass a `Synchronizable` from `react-native-worklets`
+ * (`createSynchronizable(value)`) and change it with `setBlocking`.
+ */
+export interface SynchronizableSource<TValue> {
+  getBlocking(): TValue;
+}
+
 export interface BackgroundImageOptions extends SegmentationOptions {
   readonly image: VideoEffectImageSource;
   readonly fit?: "cover" | "contain";
+  /**
+   * Aspect ratio (width / height) of the centered part of the output that a `fit: "cover"` image
+   * covers. Set it to the shape in which viewers see the video when a layout crops the video
+   * around its center. Defaults to the aspect ratio of the output. `fit: "contain"` ignores it.
+   *
+   * ```text
+   * 720x1280 output, 4:3 image, viewers see a centered 4:3 tile
+   *
+   *  no coverAspectRatio        coverAspectRatio: 4 / 3
+   * +------------------+        +------------------+
+   * |                  |        |                  |
+   * |                  |        |   mirror copy    |
+   * |                  |        |                  |
+   * :..................:        +------------------+
+   * :  the tile shows  :        |                  |
+   * :  18 % of the     :        |   whole image    |  <- the tile shows this part
+   * :  image           :        |                  |
+   * :..................:        +------------------+
+   * |                  |        |                  |
+   * |                  |        |   mirror copy    |
+   * |                  |        |                  |
+   * +------------------+        +------------------+
+   *  the image covers            the image covers
+   *  the full output             the 4:3 part
+   * ```
+   *
+   * On React Native the frame worklet works on a copy of the options, so a new number does not
+   * reach a running effect. To change the value while the effect runs, pass a `Synchronizable`
+   * from `react-native-worklets` and keep the same one for the life of the effect. It is read on
+   * every frame.
+   */
+  readonly coverAspectRatio?: number | SynchronizableSource<number>;
   readonly backgroundColor?: readonly [number, number, number, number];
 }
 

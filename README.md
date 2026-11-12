@@ -34,6 +34,18 @@ const effect = useBackgroundImage({
 });
 ```
 
+With `fit: "cover"` the image covers the full output. When viewers see the output cropped around its center, for example a portrait video in a 4:3 tile with `objectFit: "cover"`, most of the image is outside the visible part. `coverAspectRatio` (width / height) fits the image to the largest centered part of the output that has this shape:
+
+```tsx
+const effect = useBackgroundImage({
+  segmentation,
+  image,
+  coverAspectRatio: 4 / 3,
+});
+```
+
+The camera picture does not change. Outside that part the image continues as a mirror copy, so a viewer that crops to a different shape sees no bars.
+
 ## Fishjam React Native camera
 
 `@fishjam-cloud/video-effects/fishjam-react-native` runs an effect on the camera track Fishjam already publishes, through `useCamera`'s camera-track middleware. No separate camera and no custom track: the app keeps using `useCamera`, and remote peers keep seeing `peer.cameraTrack`.
@@ -58,6 +70,24 @@ const isBlurOn = currentCameraMiddleware === backgroundBlur;
 ```
 
 The middleware lives in Fishjam's camera state, so it stays applied across screens until it is cleared with `null`. Switch it on once the camera is on. Pass `onStatus` in the options to follow loading and errors.
+
+The frame worklet works on a copy of the effect options, taken when the middleware starts on a track. To change `coverAspectRatio` of a background image while the effect runs, pass a `Synchronizable` from `react-native-worklets`. It is read on every frame:
+
+```ts
+import { createSynchronizable } from "react-native-worklets";
+
+const tileAspectRatio = createSynchronizable(4 / 3);
+export const backgroundImage = createCameraEffectMiddleware(
+  createBackgroundImageEffect(() => ({
+    segmentation,
+    image,
+    coverAspectRatio: tileAspectRatio,
+  })),
+);
+
+// When the layout shows the video in a different shape:
+tileAspectRatio.setBlocking(2 / 3);
+```
 
 For a component-scoped version there is `useFishjamCameraEffect(effect | null)`, the twin of the web hook; it clears the effect when the component unmounts.
 
